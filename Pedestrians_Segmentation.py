@@ -1,16 +1,19 @@
-import torch
+import math
 import os
 import time
 
 import cv2
+import numpy as np
 import torch
 import torch.utils.data
 import torchvision
 import torchvision.transforms as transforms
 from PIL import Image
+from matplotlib import pyplot as plt
 # last layer of each architecture for transfer learning
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
+
 from helpers import get_dataset_loaders, get_coloured_mask, intersection_over_union
 
 
@@ -102,7 +105,8 @@ class Pedestrian_Segmentation:
             # model in training mode accepts both input and output and return the loss of all types
             # PG See torchvision.models.detection.transform.GeneralizedRCNNTransform for the transformation applied
             # it does resize, mean shifts and std deviations shift the images prior to use.
-            loss = self.mask_RCNN(images, targets)
+            outputs = self.mask_RCNN(images, targets)
+            loss = outputs[0]
 
             # Loss = L_cls + L_box + L_mask + L_objectness + L_rpn
 
@@ -116,6 +120,36 @@ class Pedestrian_Segmentation:
             L = L_cls + L_box + L_mask + L_objectness + L_rpn
 
             L.backward()
+
+            image = outputs[1].tensors[0].cpu().detach()
+            gradient = outputs[1].tensors.grad.cpu()[0]# there will only ever be on grad
+            # tensor_image = image.view(image.shape[1], image.shape[2], image.shape[0])
+            tensor_image = image.permute(1,2,0)
+            gradient_image = gradient.permute(1,2,0)
+            dims = image.shape
+            grads = []
+            for x in range(dims[1]):
+                for y in range (dims[2]):
+                    # tensor_image[x][y][0] = 0
+                    # tensor_image[x][y][1] = 0
+                    grad_x = gradient_image[x][y][0].item()
+                    grad_y = gradient_image[x][y][1].item()
+                    grad_color = gradient_image[x][y][2].item()
+                    total_grad = 1e8 * math.sqrt(grad_x**2 + grad_y**2 + grad_color**2)
+                    grads.append(total_grad)
+                    # if tensor_image[x][y][2] != 0.0:
+                    #     tensor_image[x][y][2] = 125
+
+            intensities = grads / np.array(grads).max() * 255
+            counter = 0
+            for x in range(dims[1]):
+                for y in range (dims[2]):
+                    tensor_image[x][y][2] = intensities[counter]
+                    counter +=1
+
+            plt.imshow(tensor_image)
+            plt.imshow(tensor_image)
+            plt.show()
 
             self.optimizer.step()
             self.optimizer.zero_grad()
@@ -228,40 +262,43 @@ class Pedestrian_Segmentation:
         image = transform(image)
 
         device = torch.device('cuda')
-        with torch.no_grad():
-            self.mask_RCNN.eval()
-            output = self.mask_RCNN([image.to(device)])[0]  # [0] because we pass 1 image
+        # PG We want the gradient information.
+        # with torch.no_grad():
+        self.mask_RCNN.eval()
+        combined_output = self.mask_RCNN([image.to(device)])
+        output = combined_output[0][0]  # [0] because we pass 1 image
+        image_tensor_from_output = combined_output[1]
 
-            # print(output)
+        # print(output)
 
-            # convert dark masking into one-hot labeled
-            # masks contains 0 and a low gray value, so it will be considered as 0
-            # convert to numpy to deal with it by openCV
-            masks = (output["masks"].cpu() >= 0.5).squeeze().numpy()
-            boxes = output["boxes"].cpu().numpy()
+        # convert dark masking into one-hot labeled
+        # masks contains 0 and a low gray value, so it will be considered as 0
+        # convert to numpy to deal with it by openCV
+        masks = (output["masks"].cpu() >= 0.5).squeeze().numpy()
+        boxes = output["boxes"].cpu().detach().numpy()
 
-            img = cv2.imread(path)
-            original = img
+        img = cv2.imread(path)
+        original = img
 
-            count = 0
-            for i, mask in enumerate(masks):
-            # for i in range(5):
-                mask = get_coloured_mask(mask)
-                mask = mask.reshape(img.shape)
+        count = 0
+        for i, mask in enumerate(masks):
+        # for i in range(5):
+            mask = get_coloured_mask(mask)
+            mask = mask.reshape(img.shape)
 
-                img = cv2.addWeighted(img, 1, mask, 0.5, 0)
-                cv2.rectangle(img, (round(boxes[i][0]), round(boxes[i][1])), (round(boxes[i][2]),round(boxes[i][3])) , (0,200,0))
-                # cv2.rectangle(img, (boxes[i][0], boxes[i][1]), (boxes[i][2],boxes[i][3]))
+            img = cv2.addWeighted(img, 1, mask, 0.5, 0)
+            cv2.rectangle(img, (round(boxes[i][0]), round(boxes[i][1])), (round(boxes[i][2]),round(boxes[i][3])) , (0,200,0))
+            # cv2.rectangle(img, (boxes[i][0], boxes[i][1]), (boxes[i][2],boxes[i][3]))
 
-                count += 1
+            count += 1
 
-                if count > 3:
-                    break
+            if count > 3:
+                break
 
-            cv2.imshow("original", original)
-            cv2.imshow("masked", img)
+        cv2.imshow("original", original)
+        cv2.imshow("masked", img)
 
-            cv2.waitKey(0)
+        cv2.waitKey(0)
 
 
 model = Pedestrian_Segmentation()
