@@ -69,8 +69,8 @@ def get_dataset_loaders(transform, batch_size, test_batch_size, root, split_pere
     test_dataset = Subset(dataset,  list( range(factor_subset, n) ) )
 
     # Loaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size,shuffle=True, collate_fn=my_collate)
-    test_loader = DataLoader(test_dataset, batch_size=test_batch_size, shuffle=False, collate_fn=my_collate)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size,shuffle=True, collate_fn=my_collate, num_workers=1)
+    test_loader = DataLoader(test_dataset, batch_size=test_batch_size, shuffle=False, collate_fn=my_collate, num_workers=1)
 
     return train_loader, test_loader, dataset
 
