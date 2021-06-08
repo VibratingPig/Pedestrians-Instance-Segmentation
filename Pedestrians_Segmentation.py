@@ -13,7 +13,7 @@ from matplotlib import pyplot as plt
 # last layer of each architecture for transfer learning
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
-
+import matplotlib.animation as ani
 from helpers import get_dataset_loaders, get_coloured_mask, intersection_over_union
 
 
@@ -55,8 +55,8 @@ class Pedestrian_Segmentation:
         self.transform = transforms.Compose([transforms.ToTensor()])
 
         self.batch_size = 1
-        self.learning_rate = 0.005
-        self.epochs = 1
+        self.learning_rate = 0.005 / 4
+        self.epochs = 100
 
         self.split_dataset_factor = 0.7
 
@@ -67,7 +67,7 @@ class Pedestrian_Segmentation:
 
         # model
         self.mask_RCNN = mask_rcnn_transfer_learning(is_finetune=True)
-        device = torch.device('cuda')
+        device = torch.device('cpu')
         self.mask_RCNN.to(device)
 
         # parameters of the modified layers via transfer learning
@@ -87,10 +87,10 @@ class Pedestrian_Segmentation:
         # threshould for bounding box evaluation
         self.IoU_threshould = 0.5
 
-    def train_one_epoch(self):
+    def train_one_epoch(self, images_list):
 
         count = 0
-        device = torch.device('cuda')
+        device = torch.device('cpu')
         bathes_per_epoch = len(self.dataset) / self.batch_size
         for i, (images, targets) in enumerate(self.train_loader):
             # PG At this point the iages are a list of two images which appear to have different sizes
@@ -121,45 +121,105 @@ class Pedestrian_Segmentation:
 
             L.backward()
 
+            # we hook into the module and re-run the forward pass after modifying for the gradient - we should
+            # start to see patterns here
+
+            class ForwardHookCapture:
+
+                def __init__(self):
+                    self.output = None
+
+                def hook(self, module, input, output):
+                    # at this point we have a tensor which is 400x432x64 - how do we represent that
+                    # we can't send it to plot.imshow - so how do we reduce the dimensionality
+
+                    print('this is the second run forward - we need to understand how to backprop the relevance')
+                    self.output = output
+            hook_cls = ForwardHookCapture()
+            #
+            self.mask_RCNN.backbone.body.conv1.register_forward_hook(hook_cls.hook)
+            outputs = self.mask_RCNN(images, targets)
+
+            def plot_feature(outputs, index, threshold=125, positive_value=255, negative_value=0):
+                my_zeros = torch.zeros(1,64,400,432)
+                # just want to set one of the 64 dimensional output to 1's and see what the
+                # output looks like
+                my_ones = torch.ones(400,432)
+                my_zeros[0,index,:,:] = my_ones
+                # this is the output layer at the first convolutional layer
+                hook_cls.output.backward(my_zeros, retain_graph=True)
+                # we are interested in the gradient value - this isn't the gradient function
+                gradient = outputs[1].tensors.grad.cpu()[0] * 100 # there will only ever be on grad
+                gi = gradient.permute(1,2,0)
+                gi[:, :, 0] = torch.where(gi[:, :, 0] > threshold, positive_value, negative_value)
+                gi[:,:,1] = gi[:,:,1] *  0
+                gi[:,:,2] = gi[:,:,2] *  0
+                print(f'Sum of gradient is {gi.sum()}')
+                plt.imshow(gi)
+                plt.show()
+            a = 1
+            # At this point I want to find out what the outputs are on the first layer? How do I listen to just that layer?
+
             image = outputs[1].tensors[0].cpu().detach()
             gradient = outputs[1].tensors.grad.cpu()[0]# there will only ever be on grad
             # tensor_image = image.view(image.shape[1], image.shape[2], image.shape[0])
             tensor_image = image.permute(1,2,0)
             gradient_image = gradient.permute(1,2,0)
-            dims = image.shape
             grads = []
-            for x in range(dims[1]):
-                for y in range (dims[2]):
-                    # tensor_image[x][y][0] = 0
-                    # tensor_image[x][y][1] = 0
-                    grad_x = gradient_image[x][y][0].item()
-                    grad_y = gradient_image[x][y][1].item()
-                    grad_color = gradient_image[x][y][2].item()
-                    total_grad = 1e8 * math.sqrt(grad_x**2 + grad_y**2 + grad_color**2)
-                    grads.append(total_grad)
-                    # if tensor_image[x][y][2] != 0.0:
-                    #     tensor_image[x][y][2] = 125
+            # for x in range(dims[1]):
+            #     for y in range (dims[2]):
+            #         # tensor_image[x][y][0] = 0
+            #         # tensor_image[x][y][1] = 0
+            #         grad_x = gradient_image[x][y][0].item()
+            #         grad_y = gradient_image[x][y][1].item()
+            #         grad_color = gradient_image[x][y][2].item()
+            #         total_grad = 1e8 * math.sqrt(grad_x**2 + grad_y**2 + grad_color**2)
+            #         # total_grad = 1e8 * math.sqrt(grad_color**2)
+            #         grads.append(total_grad)
+            #         # if tensor_image[x][y][2] != 0.0:
+            #         #     tensor_image[x][y][2] = 125
 
-            intensities = grads / np.array(grads).max() * 255
-            counter = 0
-            for x in range(dims[1]):
-                for y in range (dims[2]):
-                    tensor_image[x][y][2] = intensities[counter]
-                    counter +=1
+            # TODO multiply gradient with image?
 
-            plt.imshow(tensor_image)
-            plt.imshow(tensor_image)
-            plt.show()
+            # Hack attack
+            gradient_image = gradient_image * 1e7
 
+            # #rebase to range 0-255
+            for i in range(3):
+                max = gradient_image[:, :, i].max()
+                min = gradient_image[:, :, i].min()
+                gradient_image[:, :, i] = (gradient_image[:, :, i] - min)/ (max - min)  * 255
+                # mask = gradient_image[:, :, i] > 240
+                # gradient_image[:, :, i] = gradient_image[:, :, i][mask]
+                gradient_image[:,:,i] = torch.where(gradient_image[:,:,i]>140, gradient_image[:,:,i], gradient_image[:,:,i]*0)
+
+            total_image = tensor_image * (gradient_image)
+            dims = total_image.shape
+
+            # intensities = gradient_image[4] / np.array(gradient_image[4]).max() * 255
+            # counter = 0
+
+            # for x in range(dims[1]):
+            #     for y in range (dims[2]):
+            #         gradient_image[x][y][2] = intensities[counter]
+            #         counter +=1
+
+            # plt.imshow(tensor_image)
+            # plt.imshow(tensor_image)
+            # plt.show()
+            # plt.imshow(total_image)
+            # plt.show()
+
+            images_list.append(total_image)
             self.optimizer.step()
             self.optimizer.zero_grad()
 
             print("Loss = ", L.item(), " batch = ", i, "/", bathes_per_epoch)
             count +=1
-            if count > 3:
+            if count > 0:
                 break
 
-    def train(self):
+    def train(self, images):
 
         # set to training mode
         # PG this sets a flag on all the modules in PyTorch to train
@@ -170,7 +230,7 @@ class Pedestrian_Segmentation:
 
         for epoch in range(self.epochs):
             print(epoch + 1, "/", self.epochs)
-            self.train_one_epoch()
+            self.train_one_epoch(images)
             self.lr_scheduler.step()
 
         t2 = time.time() - t1
@@ -182,7 +242,7 @@ class Pedestrian_Segmentation:
         self.mask_RCNN.eval()
 
         # # using pycocotools
-        # device = torch.device('cuda')
+        # device = torch.device('cpu')
         # evaluate(self.mask_RCNN, self.test_loader, device)
         # return
 
@@ -194,7 +254,7 @@ class Pedestrian_Segmentation:
         # Correct detections
         TruePositives = []
 
-        device = torch.device('cuda')
+        device = torch.device('cpu')
         with torch.no_grad():
             for i, (image, target) in enumerate(self.test_loader):
                 print(f"sample evaluation {i}")
@@ -261,7 +321,7 @@ class Pedestrian_Segmentation:
         image = Image.open(path)
         image = transform(image)
 
-        device = torch.device('cuda')
+        device = torch.device('cpu')
         # PG We want the gradient information.
         # with torch.no_grad():
         self.mask_RCNN.eval()
@@ -300,19 +360,48 @@ class Pedestrian_Segmentation:
 
         cv2.waitKey(0)
 
+    def foo(self):
+        scriptmodule = torch.jit.script(self.mask_RCNN)
+        scriptmodule.cpu()
+        print(self.mask_RCNN)
 
 model = Pedestrian_Segmentation()
-model.train()
-model.save()
-model.load()
+# model.foo()
 
-# Test
-index = 2
-root = "PennFudanPed/Test"
-paths = sorted(os.listdir("PennFudanPed/Test"))
-path = os.path.join(root, paths[index])
+images = []
+model.train(images)
 
-model.detect(path)
+try:
+    def chartfunc(i):
+        i = i % len(images)
+        plt.imshow(images[i])
 
+    fig = plt.figure()
+
+    animator = ani.FuncAnimation(fig, chartfunc, frames = model.epochs, interval = 50)
+    plt.rcParams['animation.convert_path']='/home/piero/Downloads/magick'
+
+    writer = ani.ImageMagickWriter()
+    animator.save('./some.gif', writer)
+
+    # plt.show()
+
+    # import time
+    #
+    # time.sleep(100)
+
+except Exception:
+    saadd
+# model.save()
+# model.load()
+#
+# # Test
+# index = 2
+# root = "PennFudanPed/Test"
+# paths = sorted(os.listdir("PennFudanPed/Test"))
+# path = os.path.join(root, paths[index])
+#
+# model.detect(path)
+#
 
 
