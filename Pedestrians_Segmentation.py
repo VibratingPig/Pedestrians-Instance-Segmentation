@@ -1,9 +1,6 @@
-import math
-import os
 import time
 
 import cv2
-import numpy as np
 import torch
 import torch.utils.data
 import torchvision
@@ -15,9 +12,21 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 import matplotlib.animation as ani
 from helpers import get_dataset_loaders, get_coloured_mask, intersection_over_union
+import tkinter as tk
+import tkinter.ttk as ttk
+from PIL import Image, ImageTk
 
+class ForwardHookCapture:
 
-# from Coco_eval import evaluate
+    def __init__(self):
+        self.output = None
+
+    def hook(self, module, input, output):
+        # at this point we have a tensor which is 400x432x64 - how do we represent that
+        # we can't send it to plot.imshow - so how do we reduce the dimensionality
+
+        print('this is the second run forward - we need to understand how to backprop the relevance')
+        self.output = output
 
 def mask_rcnn_transfer_learning(is_finetune: bool):
     mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True)
@@ -86,6 +95,90 @@ class Pedestrian_Segmentation:
 
         # threshould for bounding box evaluation
         self.IoU_threshould = 0.5
+        self.hook_cls = ForwardHookCapture()
+        self.threshold = 0
+        self.feature_value = 0
+
+    def build_ui(self):
+        self.frame1 = ttk.Frame(tk.Tk())
+        self.label1 = ttk.Label(self.frame1)
+        self.label1.configure(text='image to go here')
+        self.label1.pack(side='top')
+        self.frame2 = ttk.Frame(self.frame1)
+        self.frame3 = ttk.Frame(self.frame2)
+        self.label2 = ttk.Label(self.frame3)
+        self.label2.configure(text='feature number')
+        self.label2.grid(column='0', row='0')
+        self.scale2 = ttk.Scale(self.frame3)
+        self.scale2.configure(from_='0', orient='horizontal', to='63')
+        self.scale2.grid(column='1', row='0')
+        self.scale2.configure(command=self.feature_changed)
+        self.frame3.configure(height='200', width='200')
+        self.frame3.grid(column='0', row='0')
+        self.frame4 = ttk.Frame(self.frame2)
+        self.label3 = ttk.Label(self.frame4)
+        self.label3.configure(text='threshold')
+        self.label3.grid(column='0', row='0')
+        self.scale1 = ttk.Scale(self.frame4)
+        self.scale1.configure(from_='0', orient='horizontal', to='255')
+        self.scale1.grid(column='1', row='0', sticky='e')
+        self.scale1.configure(command=self.scale_changed)
+        self.frame4.configure(height='200', width='200')
+        self.frame4.grid(column='0', row='1')
+        self.frame2.configure(height='200', width='200')
+        self.frame2.pack(side='top')
+        self.frame1.configure(height='200', width='200')
+        self.frame1.pack(side='top')
+        self.mainwindow = self.frame1
+
+    def feature_changed(self, scale_value):
+        self.feature_value = round(float(scale_value))
+        image = self.plot_feature(self.feature_value, threshold = self.threshold)
+        photo_image = ImageTk.PhotoImage(Image.fromarray(image.numpy(), mode = 'RGB'))
+        self.label1.configure(image=photo_image)
+        self.label1.image = photo_image
+
+    def scale_changed(self, scale_value):
+        self.threshold = round(float(scale_value))
+        image= self.plot_feature(self.feature_value, threshold = self.threshold)
+        photo_image = ImageTk.PhotoImage(Image.fromarray(image.numpy(), mode = 'RGB'))
+        self.label1.configure(image=photo_image)
+        self.label1.image = photo_image
+
+    def plot_feature(self, index, threshold=125, positive_value=255, negative_value=0):
+        #
+
+        my_zeros = torch.zeros(1, 64, 400, 432)
+        # just want to set one of the 64 dimensional output to 1's and see what the
+        # output looks like
+        my_ones = torch.ones(400, 432)
+        my_zeros[0, index, :, :] = my_ones
+        # this is the output layer at the first convolutional layer
+        self.hook_cls.output.backward(my_zeros, retain_graph=True)
+        # we are interested in the gradient value - this isn't the gradient function
+        gradient = self.outputs[1].tensors.grad.cpu()[0] * 1e7  # there will only ever be on grad
+        gradient_image = gradient.permute(1, 2, 0)
+
+        # each colour channel has its own gradients
+
+        # rebase to range 0 - 255
+        for i in range(3):
+            max = gradient_image[:, :, i].max()
+            min = gradient_image[:, :, i].min()
+            gradient_image[:, :, i] = (gradient_image[:, :, i] - min) / (max - min) * 255
+
+        gradient_image[:, :, 0] = torch.where(gradient_image[:, :, 0] > threshold, positive_value, negative_value)
+        gradient_image[:, :, 1] = torch.where(gradient_image[:, :, 1] > threshold, positive_value, negative_value)
+        gradient_image[:, :, 2] = torch.where(gradient_image[:, :, 2] > threshold, positive_value, negative_value)
+        print(f'Sum of gradient is {gradient_image.sum()}')
+        # plt.imshow(gradient_image)
+        # plt.show()
+        image = self.outputs[1].tensors[0].cpu().detach()
+        tensor_image = image.permute(1, 2, 0)
+        convolved_image = gradient_image * tensor_image
+        plt.imshow(convolved_image)
+        plt.show()
+        return convolved_image
 
     def train_one_epoch(self, images_list):
 
@@ -101,6 +194,9 @@ class Pedestrian_Segmentation:
             # squirt them down to the card taken from the torchvision reference impl.
             images = list(image.to(device) for image in images)
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+
+            self.images = images
+            self.targets = targets
 
             # model in training mode accepts both input and output and return the loss of all types
             # PG See torchvision.models.detection.transform.GeneralizedRCNNTransform for the transformation applied
@@ -124,54 +220,15 @@ class Pedestrian_Segmentation:
 
             # we hook into the module and re-run the forward pass after modifying for the gradient - we should
             # start to see patterns here
+            self.mask_RCNN.backbone.body.conv1.register_forward_hook(self.hook_cls.hook)
+            self.outputs = self.mask_RCNN(self.images, self.targets)
 
-            class ForwardHookCapture:
-
-                def __init__(self):
-                    self.output = None
-
-                def hook(self, module, input, output):
-                    # at this point we have a tensor which is 400x432x64 - how do we represent that
-                    # we can't send it to plot.imshow - so how do we reduce the dimensionality
-
-                    print('this is the second run forward - we need to understand how to backprop the relevance')
-                    self.output = output
-
-            hook_cls = ForwardHookCapture()
-            #
-            self.mask_RCNN.backbone.body.conv1.register_forward_hook(hook_cls.hook)
-            outputs = self.mask_RCNN(images, targets)
-
-            def plot_feature(outputs, index, threshold=125, positive_value=255, negative_value=0):
-                my_zeros = torch.zeros(1, 64, 400, 432)
-                # just want to set one of the 64 dimensional output to 1's and see what the
-                # output looks like
-                my_ones = torch.ones(400, 432)
-                my_zeros[0, index, :, :] = my_ones
-                # this is the output layer at the first convolutional layer
-                hook_cls.output.backward(my_zeros, retain_graph=True)
-                # we are interested in the gradient value - this isn't the gradient function
-                gradient = outputs[1].tensors.grad.cpu()[0] * 1e7  # there will only ever be on grad
-                gradient_image = gradient.permute(1, 2, 0)
-
-                # each colour channel has its own gradients
-
-                # rebase to range 0 - 255
-                for i in range(3):
-                    max = gradient_image[:, :, i].max()
-                    min = gradient_image[:, :, i].min()
-                    gradient_image[:, :, i] = (gradient_image[:, :, i] - min) / (max - min) * 255
-
-                gradient_image[:, :, 0] = torch.where(gradient_image[:, :, 0] > threshold, positive_value, negative_value)
-                gradient_image[:, :, 1] = torch.where(gradient_image[:, :, 1] > threshold, positive_value, negative_value)
-                gradient_image[:, :, 2] = torch.where(gradient_image[:, :, 2] > threshold, positive_value, negative_value)
-                print(f'Sum of gradient is {gradient_image.sum()}')
-                plt.imshow(gradient_image)
+            # plt.imshow(gradient_image * tensor_image)
                 # plt.show()
-                image = outputs[1].tensors[0].cpu().detach()
-                tensor_image = image.permute(1, 2, 0)
-                plt.imshow(gradient_image * tensor_image)
-                plt.show()
+
+            self.build_ui()
+            self.mainwindow.mainloop()
+
             a = 1
             # At this point I want to find out what the outputs are on the first layer? How do I listen to just that layer?
 
