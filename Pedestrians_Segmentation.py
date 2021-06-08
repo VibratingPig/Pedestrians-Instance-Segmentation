@@ -134,20 +134,21 @@ class Pedestrian_Segmentation:
     def feature_changed(self, scale_value):
         self.feature_value = round(float(scale_value))
         image = self.plot_feature(self.feature_value, threshold = self.threshold)
-        photo_image = ImageTk.PhotoImage(Image.fromarray(image.numpy(), mode = 'RGB'))
+
+        photo_image = ImageTk.PhotoImage(Image.fromarray(image.numpy().astype('uint8'), mode = 'RGB'))
         self.label1.configure(image=photo_image)
         self.label1.image = photo_image
 
     def scale_changed(self, scale_value):
         self.threshold = round(float(scale_value))
         image= self.plot_feature(self.feature_value, threshold = self.threshold)
-        photo_image = ImageTk.PhotoImage(Image.fromarray(image.numpy(), mode = 'RGB'))
+        photo_image = ImageTk.PhotoImage(Image.fromarray(image.numpy().astype('uint8'), mode = 'RGB'))
         self.label1.configure(image=photo_image)
         self.label1.image = photo_image
 
     def plot_feature(self, index, threshold=125, positive_value=255, negative_value=0):
         #
-
+        print(f'Setting index to {index} and {threshold}')
         my_zeros = torch.zeros(1, 64, 400, 432)
         # just want to set one of the 64 dimensional output to 1's and see what the
         # output looks like
@@ -175,10 +176,17 @@ class Pedestrian_Segmentation:
         # plt.show()
         image = self.outputs[1].tensors[0].cpu().detach()
         tensor_image = image.permute(1, 2, 0)
+        # tensor_image = image
         convolved_image = gradient_image * tensor_image
-        plt.imshow(convolved_image)
-        plt.show()
-        return convolved_image
+        for i in range(3):
+            max = convolved_image[:, :, i].max()
+            min = convolved_image[:, :, i].min()
+            convolved_image[:, :, i] = (convolved_image[:, :, i] - min) / (max - min) * 255
+
+        # plt.imshow(convolved_image.int())
+        # plt.show()
+        # convolved_image = convolved_image.permute(1,2,0)
+        return convolved_image.int()
 
     def train_one_epoch(self, images_list):
 
