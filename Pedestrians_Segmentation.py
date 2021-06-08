@@ -116,7 +116,8 @@ class Pedestrian_Segmentation:
             L_objectness = loss["loss_objectness"]
             L_rpn = loss["loss_rpn_box_reg"]
 
-            print(f'loss classifier {L_cls} loss box {L_box} loss mask {L_mask} loss objecvt {L_objectness} loss rpn {L_rpn}')
+            print(
+                f'loss classifier {L_cls} loss box {L_box} loss mask {L_mask} loss objecvt {L_objectness} loss rpn {L_rpn}')
             L = L_cls + L_box + L_mask + L_objectness + L_rpn
 
             L.backward()
@@ -135,36 +136,50 @@ class Pedestrian_Segmentation:
 
                     print('this is the second run forward - we need to understand how to backprop the relevance')
                     self.output = output
+
             hook_cls = ForwardHookCapture()
             #
             self.mask_RCNN.backbone.body.conv1.register_forward_hook(hook_cls.hook)
             outputs = self.mask_RCNN(images, targets)
 
             def plot_feature(outputs, index, threshold=125, positive_value=255, negative_value=0):
-                my_zeros = torch.zeros(1,64,400,432)
+                my_zeros = torch.zeros(1, 64, 400, 432)
                 # just want to set one of the 64 dimensional output to 1's and see what the
                 # output looks like
-                my_ones = torch.ones(400,432)
-                my_zeros[0,index,:,:] = my_ones
+                my_ones = torch.ones(400, 432)
+                my_zeros[0, index, :, :] = my_ones
                 # this is the output layer at the first convolutional layer
                 hook_cls.output.backward(my_zeros, retain_graph=True)
                 # we are interested in the gradient value - this isn't the gradient function
-                gradient = outputs[1].tensors.grad.cpu()[0] * 100 # there will only ever be on grad
-                gi = gradient.permute(1,2,0)
-                gi[:, :, 0] = torch.where(gi[:, :, 0] > threshold, positive_value, negative_value)
-                gi[:,:,1] = gi[:,:,1] *  0
-                gi[:,:,2] = gi[:,:,2] *  0
-                print(f'Sum of gradient is {gi.sum()}')
-                plt.imshow(gi)
+                gradient = outputs[1].tensors.grad.cpu()[0] * 1e7  # there will only ever be on grad
+                gradient_image = gradient.permute(1, 2, 0)
+
+                # each colour channel has its own gradients
+
+                # rebase to range 0 - 255
+                for i in range(3):
+                    max = gradient_image[:, :, i].max()
+                    min = gradient_image[:, :, i].min()
+                    gradient_image[:, :, i] = (gradient_image[:, :, i] - min) / (max - min) * 255
+
+                gradient_image[:, :, 0] = torch.where(gradient_image[:, :, 0] > threshold, positive_value, negative_value)
+                gradient_image[:, :, 1] = torch.where(gradient_image[:, :, 1] > threshold, positive_value, negative_value)
+                gradient_image[:, :, 2] = torch.where(gradient_image[:, :, 2] > threshold, positive_value, negative_value)
+                print(f'Sum of gradient is {gradient_image.sum()}')
+                plt.imshow(gradient_image)
+                # plt.show()
+                image = outputs[1].tensors[0].cpu().detach()
+                tensor_image = image.permute(1, 2, 0)
+                plt.imshow(gradient_image * tensor_image)
                 plt.show()
             a = 1
             # At this point I want to find out what the outputs are on the first layer? How do I listen to just that layer?
 
             image = outputs[1].tensors[0].cpu().detach()
-            gradient = outputs[1].tensors.grad.cpu()[0]# there will only ever be on grad
+            gradient = outputs[1].tensors.grad.cpu()[0]  # there will only ever be on grad
             # tensor_image = image.view(image.shape[1], image.shape[2], image.shape[0])
-            tensor_image = image.permute(1,2,0)
-            gradient_image = gradient.permute(1,2,0)
+            tensor_image = image.permute(1, 2, 0)
+            gradient_image = gradient.permute(1, 2, 0)
             grads = []
             # for x in range(dims[1]):
             #     for y in range (dims[2]):
@@ -188,10 +203,11 @@ class Pedestrian_Segmentation:
             for i in range(3):
                 max = gradient_image[:, :, i].max()
                 min = gradient_image[:, :, i].min()
-                gradient_image[:, :, i] = (gradient_image[:, :, i] - min)/ (max - min)  * 255
+                gradient_image[:, :, i] = (gradient_image[:, :, i] - min) / (max - min) * 255
                 # mask = gradient_image[:, :, i] > 240
                 # gradient_image[:, :, i] = gradient_image[:, :, i][mask]
-                gradient_image[:,:,i] = torch.where(gradient_image[:,:,i]>140, gradient_image[:,:,i], gradient_image[:,:,i]*0)
+                gradient_image[:, :, i] = torch.where(gradient_image[:, :, i] > 140, gradient_image[:, :, i],
+                                                      gradient_image[:, :, i] * 0)
 
             total_image = tensor_image * (gradient_image)
             dims = total_image.shape
@@ -215,7 +231,7 @@ class Pedestrian_Segmentation:
             self.optimizer.zero_grad()
 
             print("Loss = ", L.item(), " batch = ", i, "/", bathes_per_epoch)
-            count +=1
+            count += 1
             if count > 0:
                 break
 
@@ -342,12 +358,13 @@ class Pedestrian_Segmentation:
 
         count = 0
         for i, mask in enumerate(masks):
-        # for i in range(5):
+            # for i in range(5):
             mask = get_coloured_mask(mask)
             mask = mask.reshape(img.shape)
 
             img = cv2.addWeighted(img, 1, mask, 0.5, 0)
-            cv2.rectangle(img, (round(boxes[i][0]), round(boxes[i][1])), (round(boxes[i][2]),round(boxes[i][3])) , (0,200,0))
+            cv2.rectangle(img, (round(boxes[i][0]), round(boxes[i][1])), (round(boxes[i][2]), round(boxes[i][3])),
+                          (0, 200, 0))
             # cv2.rectangle(img, (boxes[i][0], boxes[i][1]), (boxes[i][2],boxes[i][3]))
 
             count += 1
@@ -365,6 +382,7 @@ class Pedestrian_Segmentation:
         scriptmodule.cpu()
         print(self.mask_RCNN)
 
+
 model = Pedestrian_Segmentation()
 # model.foo()
 
@@ -376,10 +394,11 @@ try:
         i = i % len(images)
         plt.imshow(images[i])
 
+
     fig = plt.figure()
 
-    animator = ani.FuncAnimation(fig, chartfunc, frames = model.epochs, interval = 50)
-    plt.rcParams['animation.convert_path']='/home/piero/Downloads/magick'
+    animator = ani.FuncAnimation(fig, chartfunc, frames=model.epochs, interval=50)
+    plt.rcParams['animation.convert_path'] = '/home/piero/Downloads/magick'
 
     writer = ani.ImageMagickWriter()
     animator.save('./some.gif', writer)
@@ -403,5 +422,3 @@ except Exception:
 #
 # model.detect(path)
 #
-
-
