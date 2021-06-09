@@ -20,6 +20,7 @@ class ForwardHookCapture:
 
     def __init__(self):
         self.output = None
+        self.inputs = None
 
     def hook(self, module, input, output):
         # at this point we have a tensor which is 400x432x64 - how do we represent that
@@ -27,6 +28,7 @@ class ForwardHookCapture:
 
         print('this is the second run forward - we need to understand how to backprop the relevance')
         self.output = output
+        self.inputs = input
 
 def mask_rcnn_transfer_learning(is_finetune: bool):
     mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True)
@@ -134,7 +136,6 @@ class Pedestrian_Segmentation:
     def feature_changed(self, scale_value):
         self.feature_value = round(float(scale_value))
         image = self.plot_feature(self.feature_value, threshold = self.threshold)
-
         photo_image = ImageTk.PhotoImage(Image.fromarray(image.numpy().astype('uint8'), mode = 'RGB'))
         self.label1.configure(image=photo_image)
         self.label1.image = photo_image
@@ -149,39 +150,58 @@ class Pedestrian_Segmentation:
     def plot_feature(self, index, threshold=125, positive_value=255, negative_value=0):
         #
         print(f'Setting index to {index} and {threshold}')
+        # self.mask_RCNN.backbone.body.conv1.register_forward_hook(self.hook_cls.hook)
+        # self.outputs = self.mask_RCNN(self.images, self.targets)
         my_zeros = torch.zeros(1, 64, 400, 432)
         # just want to set one of the 64 dimensional output to 1's and see what the
         # output looks like
         my_ones = torch.ones(400, 432)
         my_zeros[0, index, :, :] = my_ones
         # this is the output layer at the first convolutional layer
-        self.hook_cls.output.backward(my_zeros, retain_graph=True)
+        # need to supply inputs as the gradient is accumulated otherwise
+        self.hook_cls.output.backward(my_zeros, inputs = self.hook_cls.inputs, create_graph=True)
         # we are interested in the gradient value - this isn't the gradient function
-        gradient = self.outputs[1].tensors.grad.cpu()[0] * 1e7  # there will only ever be on grad
+        # detach to remove it from the graph and play with it
+        gradient = self.outputs[1].tensors.grad.cpu().detach()[0]  # there will only ever be on grad
         gradient_image = gradient.permute(1, 2, 0)
-
+        # OMG - this is a pain in the a&$e
+        # self.optimizer.step()
+        # self.optimizer.zero_grad()
+        # zeroing out the gradient appears to be consistent
+        self.outputs[1].tensors.grad = self.outputs[1].tensors.grad * 0
+        # print(gradient[0,:,:])
         # each colour channel has its own gradients
 
         # rebase to range 0 - 255
-        for i in range(3):
-            max = gradient_image[:, :, i].max()
-            min = gradient_image[:, :, i].min()
-            gradient_image[:, :, i] = (gradient_image[:, :, i] - min) / (max - min) * 255
+        # for i in range(3):
+        #     max = gradient_image[:, :, i].max()
+        #     min = gradient_image[:, :, i].min()
+        #     gradient_image[:, :, i] = (gradient_image[:, :, i] - min) / (max - min) * 255
 
-        gradient_image[:, :, 0] = torch.where(gradient_image[:, :, 0] > threshold, positive_value, negative_value)
-        gradient_image[:, :, 1] = torch.where(gradient_image[:, :, 1] > threshold, positive_value, negative_value)
-        gradient_image[:, :, 2] = torch.where(gradient_image[:, :, 2] > threshold, positive_value, negative_value)
-        print(f'Sum of gradient is {gradient_image.sum()}')
         # plt.imshow(gradient_image)
         # plt.show()
+        # apply threshold to the image after we have convolved it and normalized it
+
         image = self.outputs[1].tensors[0].cpu().detach()
         tensor_image = image.permute(1, 2, 0)
-        # tensor_image = image
+
+
         convolved_image = gradient_image * tensor_image
+        # renormalize colours as they may be beyond the 0 - 255 range
         for i in range(3):
             max = convolved_image[:, :, i].max()
             min = convolved_image[:, :, i].min()
             convolved_image[:, :, i] = (convolved_image[:, :, i] - min) / (max - min) * 255
+
+        # filter all colors below a certain level - the level is the strength of the activation hence feature
+        # strength
+        for i in range(3):
+            convolved_image[:, :, i][convolved_image[:, :, i] < threshold] = 0
+
+        # convolved_image[:, :, 0] = torch.where(convolved_image[:, :, 0] > threshold, positive_value, negative_value)
+        # convolved_image[:, :, 1] = torch.where(convolved_image[:, :, 1] > threshold, positive_value, negative_value)
+        # convolved_image[:, :, 2] = torch.where(convolved_image[:, :, 2] > threshold, positive_value, negative_value)
+        print(f'Sum of gradient is {gradient_image.sum()}')
 
         # plt.imshow(convolved_image.int())
         # plt.show()
