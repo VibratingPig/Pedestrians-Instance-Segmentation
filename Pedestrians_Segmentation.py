@@ -149,6 +149,8 @@ class Pedestrian_Segmentation:
 
     def plot_feature(self, index, threshold=125, positive_value=255, negative_value=0):
         #
+        device = torch.device('cpu')
+
         print(f'Setting index to {index} and {threshold}')
         # self.mask_RCNN.backbone.body.conv1.register_forward_hook(self.hook_cls.hook)
         # self.outputs = self.mask_RCNN(self.images, self.targets)
@@ -159,7 +161,11 @@ class Pedestrian_Segmentation:
         my_zeros[0, index, :, :] = my_ones
         # this is the output layer at the first convolutional layer
         # need to supply inputs as the gradient is accumulated otherwise
+        my_zeros = my_zeros.to(device)
+        # TODO This LEAKS MEMORY!!!!!!
         self.hook_cls.output.backward(my_zeros, inputs = self.hook_cls.inputs, create_graph=True)
+        # now move the zeros back to the cpu to free up space.
+        my_zeros = my_zeros.cpu()
         # we are interested in the gradient value - this isn't the gradient function
         # detach to remove it from the graph and play with it
         gradient = self.outputs[1].tensors.grad.cpu().detach()[0]  # there will only ever be on grad
