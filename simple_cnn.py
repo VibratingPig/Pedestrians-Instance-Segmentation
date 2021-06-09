@@ -33,22 +33,31 @@ criterion = L1Loss()
 print(model)
 model.train()
 
-for i in range(1000):
+print(model.parameters())
+for x in model.parameters():
+    print(x)
+
+# first parameter is 1,1,2,2 - so weights for the incoming convolution?
+# second parameter is single number 0.3741 in this case weight for the output?
+
+for i in range(80):
     optimizer.zero_grad()
     output_train = model(x_train)
 
     loss = criterion(output_train, y_train)
 
     # print('Output training')
-    # print(output_train)
+    # print(output_train.item())
 
     # given we are using the l1 loss this would be a signed difference
-    # print('Loss function')
+    print('Loss function')
     print(loss.item())
 
     loss.backward()
     optimizer.step()
 
+for x in model.parameters():
+    print(x)
 # y = cnn_layer(ones)
 
 # print(y)
