@@ -62,15 +62,16 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
 class Pedestrian_Segmentation:
     def __init__(self):
 
-        self.device = 'cuda'
+        self.device = 'cpu'
+        self.ui = False
 
         # Hyperparameters
         self.root = 'Kaggle'
         self.transform = transforms.Compose([transforms.ToTensor()])
 
         self.batch_size = 1
-        self.learning_rate = 0.005
-        self.epochs = 2
+        self.learning_rate = 0.0005
+        self.epochs = 10
 
         self.split_dataset_factor = 0.7
 
@@ -103,7 +104,6 @@ class Pedestrian_Segmentation:
         self.hook_cls = ForwardHookCapture()
         self.threshold = 0
         self.feature_value = 0
-        self.ui = True
 
     def build_ui(self):
         self.frame1 = ttk.Frame(tk.Tk())

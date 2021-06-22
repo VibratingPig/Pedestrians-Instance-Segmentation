@@ -3,6 +3,9 @@ from torch.utils.data import Dataset
 import os
 from PIL import Image
 import numpy as np
+import pandas as pd
+import ast
+
 
 class MaskCreator():
 
@@ -10,11 +13,11 @@ class MaskCreator():
         pass
 
     def create_mask(self, x, y):
-        return np.array([1,2,3])
+        return np.array([1, 2, 3])
 
 
 class PennnFudanDataset(Dataset):
-    def __init__(self,root, transform=None, use_masks=True):
+    def __init__(self, root, transform=None, use_masks=True):
 
         self.transform = transform
         self.root = root
@@ -28,20 +31,20 @@ class PennnFudanDataset(Dataset):
         # self.rootAnnotation = os.path.join(self.root, "Annotation")
 
         # list of data paths
-        self.imagesPaths = sorted( os.listdir(self.rootImages) )
-        self.masksPaths  = sorted( os.listdir(self.rootMasks) )
+        self.imagesPaths = sorted(os.listdir(self.rootImages))
+        self.masksPaths = sorted(os.listdir(self.rootMasks))
         # self.annotationPaths  = sorted( os.listdir(self.rootAnnotation))
 
-        self.imagesPaths = [ os.path.join(self.rootImages, image) for image in self.imagesPaths ]
-        self.masksPaths = [ os.path.join(self.rootMasks, mask) for mask in self.masksPaths ]
-
+        self.imagesPaths = [os.path.join(self.rootImages, image) for image in self.imagesPaths]
+        self.masksPaths = [os.path.join(self.rootMasks, mask) for mask in self.masksPaths]
 
     def __getitem__(self, index):
 
+        image_name = self.imagesPaths[index].split('/')[2].split(".")[0]
         # load image & mask
         image = Image.open(self.imagesPaths[index])
         if self.use_masks:
-            mask  = Image.open(self.masksPaths[index])
+            mask = Image.open(self.masksPaths[index])
 
         image = image.convert("RGB")
 
@@ -60,7 +63,7 @@ class PennnFudanDataset(Dataset):
             IDs = IDs[1:]
 
             # transpose it to (N,1,1) to be similar to a column vector
-            IDs = IDs.reshape(-1,1,1)
+            IDs = IDs.reshape(-1, 1, 1)
 
             masks = np.array(mask) == IDs
 
@@ -85,38 +88,59 @@ class PennnFudanDataset(Dataset):
                 # if we don't have that then we can support the relevant xmin, xmax, ymin and ymax
                 # to teh
                 boxes.append([xmin, ymin, xmax, ymax])
-                area.append((ymax-ymin) * (xmax-xmin))
+                area.append((ymax - ymin) * (xmax - xmin))
 
         if not self.use_masks:
             # PG Hard coded from train_image_level.csv
-            xmin = 2753
-            ymin = 906
-            xmax = xmin + 1058
-            ymax = ymin + 1672
-            boxes.append([xmin, ymin, xmax, ymax])
-            area.append((ymax-ymin) * (xmax-xmin))
+            # xmin = 2753
+            # ymin = 906
+            # xmax = xmin + 1058
+            # ymax = ymin + 1672
+            # boxes.append([xmin, ymin, xmax, ymax])
+            # area.append((ymax-ymin) * (xmax-xmin))
+            #
+            # xmin = 788
+            # ymin = 820
+            # xmax = xmin + 1144
+            # ymax = ymin + 1879
+            # boxes.append([xmin, ymin, xmax, ymax])
+            # area.append((ymax-ymin) * (xmax-xmin))
 
-            xmin = 788
-            ymin = 820
-            xmax = xmin + 1144
-            ymax = ymin + 1879
-            boxes.append([xmin, ymin, xmax, ymax])
-            area.append((ymax-ymin) * (xmax-xmin))
-            # this is the number of masks/bounding boxes not the number of images.
-            N=2
+            df = pd.read_csv('./Kaggle/PedMasks/train_image_level.csv')
 
-        # create an array of size X * Y and then set the range of the mask
-        # x[1,1:1,] = 1
+            image_id = image_name.split('.')[0] + "_image"
+            row = df[df.id == image_id]
+            oo = np.zeros([1, image.width, image.height])
+            # row.boxes is a pandas series
+            for box in row.boxes:
+                list_of_dictionaries = ast.literal_eval(box)
+                N = len(list_of_dictionaries)
+                oo = np.zeros([N, image.size[0], image.size[1]])
+                for i, boundary_boxes in enumerate(list_of_dictionaries):
+                    # box is a string representation of the bounds
+                    # its a list of dictionaries
+
+                    x = int(boundary_boxes['x'])
+                    y = int(boundary_boxes['y'])
+                    x_width = int(boundary_boxes['width'])
+                    y_height = int(boundary_boxes['height'])
+                    print(f'For {image_name} setting {x},{y} to {x+x_width}, {y+y_height} for {x_width} and {y_height}')
+                    boxes.append([x, y, x + x_width, y + y_height])
+                    area.append(x_width * y_height)
+                    oo[i, x:(x+x_width), y:(y+y_height)] = i + 1
+
+                # this is the number of masks/bounding boxes not the number of images.
+
+            # create an array of size X * Y and then set the range of the mask
+            # x[1,1:1,] = 1
             # size of image
-            oo = np.zeros([1, 4256, 3488])
             # note that the masks are multidimensional array and the supplied
             # mask png sets mask 1 to value 1 and mask 2 to value 2 etc. to produce a multidimensional
             # array
             # indexed from 0
-            oo[0, 2753:3811, 906:2578] = 1
             # box 2
-            oo[0, 788:1932, 820:2699] = 2
-        # then do a boolean x_prime = x[==True]
+            # oo[0, 788:1932, 820:2699] = 2
+            # then do a boolean x_prime = x[==True]
             # you can pass an array and it returns an multi dimensional array
             IDs = np.unique(np.array(oo))
             # remove the background ID
@@ -164,5 +188,3 @@ class PennnFudanDataset(Dataset):
 
     def __len__(self):
         return len(self.imagesPaths)
-
-
