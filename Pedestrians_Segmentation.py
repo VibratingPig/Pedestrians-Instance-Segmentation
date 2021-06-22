@@ -62,10 +62,10 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
 class Pedestrian_Segmentation:
     def __init__(self):
 
-        self.device = 'cuda'
+        self.device = 'cpu'
 
         # Hyperparameters
-        self.root = "PennFudanPed"
+        self.root = 'Kaggle'
         self.transform = transforms.Compose([transforms.ToTensor()])
 
         self.batch_size = 1

@@ -4,12 +4,22 @@ import os
 from PIL import Image
 import numpy as np
 
+class MaskCreator():
+
+    def __init__(self):
+        pass
+
+    def create_mask(self, x, y):
+        return np.array([1,2,3])
+
 
 class PennnFudanDataset(Dataset):
     def __init__(self,root, transform=None, use_masks=True):
 
         self.transform = transform
         self.root = root
+        if self.root == 'Kaggle':
+            use_masks = False
         self.use_masks = use_masks
 
         # root paths
@@ -39,28 +49,26 @@ class PennnFudanDataset(Dataset):
 
         # get list of object IDs (Pedestrians in the mask)
         # ex: if mask has 3 people in it, IDs = [0, 1, 2, 3] ... 0 for background and 1,2,3 for each pedestrian
-        if self.use_masks:
-            IDs = np.unique(np.array(mask))
-        # remove the background ID
-        IDs = IDs[1:]
-
-        # transpose it to (N,1,1) to be similar to a column vector
-        IDs = IDs.reshape(-1,1,1)
-
-        # extract each mask from the IDs 
-        if self.use_masks:
-            masks = np.array(mask) == IDs
-
-        # N Boxes
-        N = len(IDs)
 
         boxes = []
         # area for each box
         area = []
 
-        # PG Hard code these for now
-
         if self.use_masks:
+            IDs = np.unique(np.array(mask))
+            # remove the background ID
+            IDs = IDs[1:]
+
+            # transpose it to (N,1,1) to be similar to a column vector
+            IDs = IDs.reshape(-1,1,1)
+
+            masks = np.array(mask) == IDs
+
+            # N Boxes
+            N = len(IDs)
+
+            # PG Hard code these for now
+
             for i in range(N):
                 # where gets the pixels where the mask = True (mask is a 2D Array of true and false ,
                 # true at the pixels that is 1 as an indication of the mask & 0 for background)
@@ -94,6 +102,31 @@ class PennnFudanDataset(Dataset):
             ymax = ymin + 1879
             boxes.append([xmin, ymin, xmax, ymax])
             area.append((ymax-ymin) * (xmax-xmin))
+            # this is the number of masks/bounding boxes not the number of images.
+            N=2
+
+        # create an array of size X * Y and then set the range of the mask
+        # x[1,1:1,] = 1
+            # size of image
+            oo = np.zeros([1, 4256, 3488])
+            # note that the masks are multidimensional array and the supplied
+            # mask png sets mask 1 to value 1 and mask 2 to value 2 etc. to produce a multidimensional
+            # array
+            # indexed from 0
+            oo[0, 2753:3811, 906:2578] = 1
+            # box 2
+            oo[0, 788:1932, 820:2699] = 2
+        # then do a boolean x_prime = x[==True]
+            # you can pass an array and it returns an multi dimensional array
+            IDs = np.unique(np.array(oo))
+            # remove the background ID
+            IDs = IDs[1:]
+
+            # transpose it to (N,1,1) to be similar to a column vector
+            IDs = IDs.reshape(-1, 1, 1)
+
+            masks = np.array(oo) == IDs
+            # masks = (oo == [[1],[2]])
 
         # convert 2D List to 2D Tensor (this is not numpy array)
         boxes = torch.as_tensor(boxes, dtype=torch.float32)
