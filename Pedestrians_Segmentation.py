@@ -62,12 +62,14 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
 class Pedestrian_Segmentation:
     def __init__(self):
 
+        self.device = 'cuda'
+
         # Hyperparameters
         self.root = "PennFudanPed"
         self.transform = transforms.Compose([transforms.ToTensor()])
 
         self.batch_size = 1
-        self.learning_rate = 0.005 / 4
+        self.learning_rate = 0.005
         self.epochs = 1
 
         self.split_dataset_factor = 0.7
@@ -79,7 +81,7 @@ class Pedestrian_Segmentation:
 
         # model
         self.mask_RCNN = mask_rcnn_transfer_learning(is_finetune=True)
-        device = torch.device('cuda')
+        device = torch.device(self.device)
         self.mask_RCNN.to(device)
 
         # parameters of the modified layers via transfer learning
@@ -101,6 +103,7 @@ class Pedestrian_Segmentation:
         self.hook_cls = ForwardHookCapture()
         self.threshold = 0
         self.feature_value = 0
+        self.ui = True
 
     def build_ui(self):
         self.frame1 = ttk.Frame(tk.Tk())
@@ -150,7 +153,7 @@ class Pedestrian_Segmentation:
 
     def plot_feature(self, index, threshold=125, positive_value=255, negative_value=0):
         #
-        device = torch.device('cuda')
+        device = torch.device(self.device)
         L = self.run_backwards()
 
         image = self.outputs[1].tensors[0].cpu().detach()
@@ -158,10 +161,10 @@ class Pedestrian_Segmentation:
         print(f'Setting index to {index} and {threshold}')
         # self.mask_RCNN.backbone.body.conv1.register_forward_hook(self.hook_cls.hook)
         # self.outputs = self.mask_RCNN(self.images, self.targets)
-        my_zeros = torch.zeros(1, 64, 400, 448)
+        my_zeros = torch.zeros(1, 64, 400, 432)
         # just want to set one of the 64 dimensional output to 1's and see what the
         # output looks like
-        my_ones = torch.ones(400, 448)
+        my_ones = torch.ones(400, 432)
         my_zeros[0, index, :, :] = my_ones
         # this is the output layer at the first convolutional layer
         # need to supply inputs as the gradient is accumulated otherwise
@@ -201,19 +204,24 @@ class Pedestrian_Segmentation:
         tensor_image = image.permute(1, 2, 0)
         # tensor_image = tensor_image.sum(2)
 
-        # plt.imshow(tensor_image)
-        # plt.show()
+        # here we perform sensitivity analysis to find out the changes in the image
+        # this is not the same as mutliplying by the gradient - we are moving in the direction of steepest descent
+        # convolved_image = tensor_image - gradient_image
 
+        # Deep taylor expansion is * not +
         convolved_image = gradient_image * tensor_image
+        # convolved_image = tensor_image
+        # filter all colors below a certain level - the level is the strength of the activation hence feature
+        # strength
+
         # renormalize colours as they may be beyond the 0 - 255 range
         for i in range(3):
             max = convolved_image[:, :, i].max()
             min = convolved_image[:, :, i].min()
             convolved_image[:, :, i] = (convolved_image[:, :, i] - min) / (max - min) * 255
 
-        # filter all colors below a certain level - the level is the strength of the activation hence feature
-        # strength
         for i in range(3):
+            # Note you can set this to 0 to see what contradictory evidence is presented
             convolved_image[:, :, i][convolved_image[:, :, i] < threshold] = 0
 
         # convolved_image[:, :, 0] = torch.where(convolved_image[:, :, 0] > threshold, positive_value, negative_value)
@@ -221,7 +229,7 @@ class Pedestrian_Segmentation:
         # convolved_image[:, :, 2] = torch.where(convolved_image[:, :, 2] > threshold, positive_value, negative_value)
         print(f'Sum of gradient is {gradient_image.sum()}')
 
-        # plt.imshow(convolved_image.int())
+        # plt.imshow(tensor_image.int().sum(2))
         # plt.show()
         # convolved_image = convolved_image.permute(1,2,0)
         return convolved_image.int()
@@ -229,7 +237,7 @@ class Pedestrian_Segmentation:
     def train_one_epoch(self, images_list):
 
         count = 0
-        device = torch.device('cuda')
+        device = torch.device(self.device)
         bathes_per_epoch = len(self.dataset) / self.batch_size
         for i, (images, targets) in enumerate(self.train_loader):
             # PG At this point the iages are a list of two images which appear to have different sizes
@@ -254,9 +262,10 @@ class Pedestrian_Segmentation:
 
             print("Loss = ", L.item(), " batch = ", i, "/", bathes_per_epoch)
             count += 1
-            # if count > 40:
-            #     break
+            if count > 0:
+                break
 
+        # move everyting to CPU
         device = torch.device('cpu')
         images = list(image.to(device) for image in images)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
@@ -296,8 +305,9 @@ class Pedestrian_Segmentation:
         self.mask_RCNN.backbone.body.conv1.register_forward_hook(self.hook_cls.hook)
         self.outputs = model.mask_RCNN(self.images, self.targets)
 
-        self.build_ui()
-        self.mainwindow.mainloop()
+        if self.ui:
+            self.build_ui()
+            self.mainwindow.mainloop()
 
     def eval(self):
 
@@ -305,7 +315,7 @@ class Pedestrian_Segmentation:
         self.mask_RCNN.eval()
 
         # # using pycocotools
-        # device = torch.device('cuda')
+        # device = torch.device(self.device)
         # evaluate(self.mask_RCNN, self.test_loader, device)
         # return
 
@@ -317,7 +327,7 @@ class Pedestrian_Segmentation:
         # Correct detections
         TruePositives = []
 
-        device = torch.device('cuda')
+        device = torch.device(self.device)
         with torch.no_grad():
             for i, (image, target) in enumerate(self.test_loader):
                 print(f"sample evaluation {i}")
@@ -384,13 +394,13 @@ class Pedestrian_Segmentation:
         image = Image.open(path)
         image = transform(image)
 
-        device = torch.device('cuda')
+        device = torch.device(self.device)
         # PG We want the gradient information.
-        # with torch.no_grad():
-        self.mask_RCNN.eval()
-        combined_output = self.mask_RCNN([image.to(device)])
-        output = combined_output[0][0]  # [0] because we pass 1 image
-        image_tensor_from_output = combined_output[1]
+        with torch.no_grad():
+            self.mask_RCNN.eval()
+            combined_output = self.mask_RCNN([image.to(device)])
+            output = combined_output[0][0]  # [0] because we pass 1 image
+            # image_tensor_from_output = combined_output[1]
 
         # print(output)
 
@@ -416,8 +426,8 @@ class Pedestrian_Segmentation:
 
             count += 1
 
-            if count > 0:
-                break
+            # if count > 0:
+            #     break
 
         cv2.imshow("original", original)
         cv2.imshow("masked", img)
@@ -431,12 +441,13 @@ class Pedestrian_Segmentation:
 
 
 model = Pedestrian_Segmentation()
+print(model.mask_RCNN)
 # model.foo()
 
 images = []
 model.train(images)
-# model.save()
-# model.load()
+model.save()
+model.load()
 
 # model.build_ui()
 # model.mainwindow.mainloop()
@@ -447,10 +458,10 @@ model.train(images)
 #
 # #
 # # # Test
-# index = 2
-# root = "PennFudanPed/Test"
-# paths = sorted(os.listdir("PennFudanPed/Test"))
-# path = os.path.join(root, paths[index])
-#
-# model.detect(path)
+index = 0
+root = "Kaggle/Test"
+paths = sorted(os.listdir("Kaggle/Test"))
+path = os.path.join(root, paths[index])
+
+model.detect(path)
 # #

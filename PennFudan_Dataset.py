@@ -6,10 +6,11 @@ import numpy as np
 
 
 class PennnFudanDataset(Dataset):
-    def __init__(self,root, transform=None):
+    def __init__(self,root, transform=None, use_masks=True):
 
         self.transform = transform
         self.root = root
+        self.use_masks = use_masks
 
         # root paths
         self.rootImages = os.path.join(self.root, "PNGImages")
@@ -29,7 +30,8 @@ class PennnFudanDataset(Dataset):
 
         # load image & mask
         image = Image.open(self.imagesPaths[index])
-        mask  = Image.open(self.masksPaths[index])
+        if self.use_masks:
+            mask  = Image.open(self.masksPaths[index])
 
         image = image.convert("RGB")
 
@@ -37,7 +39,8 @@ class PennnFudanDataset(Dataset):
 
         # get list of object IDs (Pedestrians in the mask)
         # ex: if mask has 3 people in it, IDs = [0, 1, 2, 3] ... 0 for background and 1,2,3 for each pedestrian
-        IDs = np.unique(np.array(mask))
+        if self.use_masks:
+            IDs = np.unique(np.array(mask))
         # remove the background ID
         IDs = IDs[1:]
 
@@ -45,7 +48,8 @@ class PennnFudanDataset(Dataset):
         IDs = IDs.reshape(-1,1,1)
 
         # extract each mask from the IDs 
-        masks = np.array(mask) == IDs
+        if self.use_masks:
+            masks = np.array(mask) == IDs
 
         # N Boxes
         N = len(IDs)
@@ -54,18 +58,40 @@ class PennnFudanDataset(Dataset):
         # area for each box
         area = []
 
-        for i in range(N):
-            # where gets the pixels where the mask = True (mask is a 2D Array of true and false , 
-            # true at the pixels that is 1 as an indication of the mask & 0 for background)
-            mask_pixels = np.where(masks[i])
+        # PG Hard code these for now
 
-            # extract the box from the min & max of these points
-            # first dim is y , second dim is x
-            xmin = np.min(mask_pixels[1])
-            xmax = np.max(mask_pixels[1])
-            ymin = np.min(mask_pixels[0])
-            ymax = np.max(mask_pixels[0])
+        if self.use_masks:
+            for i in range(N):
+                # where gets the pixels where the mask = True (mask is a 2D Array of true and false ,
+                # true at the pixels that is 1 as an indication of the mask & 0 for background)
+                mask_pixels = np.where(masks[i])
 
+                # extract the box from the min & max of these points
+                # first dim is y , second dim is x
+                xmin = np.min(mask_pixels[1])
+                xmax = np.max(mask_pixels[1])
+                ymin = np.min(mask_pixels[0])
+                ymax = np.max(mask_pixels[0])
+
+                # PG This is where the boxes are appended - it's worked out from the mask png
+                # if we don't have that then we can support the relevant xmin, xmax, ymin and ymax
+                # to teh
+                boxes.append([xmin, ymin, xmax, ymax])
+                area.append((ymax-ymin) * (xmax-xmin))
+
+        if not self.use_masks:
+            # PG Hard coded from train_image_level.csv
+            xmin = 2753
+            ymin = 906
+            xmax = xmin + 1058
+            ymax = ymin + 1672
+            boxes.append([xmin, ymin, xmax, ymax])
+            area.append((ymax-ymin) * (xmax-xmin))
+
+            xmin = 788
+            ymin = 820
+            xmax = xmin + 1144
+            ymax = ymin + 1879
             boxes.append([xmin, ymin, xmax, ymax])
             area.append((ymax-ymin) * (xmax-xmin))
 

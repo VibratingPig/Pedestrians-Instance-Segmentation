@@ -59,7 +59,7 @@ def my_collate(batch):
 def get_dataset_loaders(transform, batch_size, test_batch_size, root, split_perecentage):
 
     # Load Dataset
-    dataset = PennnFudanDataset(root, transform)
+    dataset = PennnFudanDataset(root, transform, True)
 
     # Split dataset into train and test
     n = len(dataset)
@@ -70,8 +70,9 @@ def get_dataset_loaders(transform, batch_size, test_batch_size, root, split_pere
 
     # Loaders
     shuffle = False
-    train_loader = DataLoader(train_dataset, batch_size=batch_size,shuffle=shuffle, collate_fn=my_collate, num_workers=1)
-    test_loader = DataLoader(test_dataset, batch_size=test_batch_size, shuffle=False, collate_fn=my_collate, num_workers=1)
+    # PG Disable multi processing with num_workers=0
+    train_loader = DataLoader(train_dataset, batch_size=batch_size,shuffle=shuffle, collate_fn=my_collate, num_workers=0)
+    test_loader = DataLoader(test_dataset, batch_size=test_batch_size, shuffle=False, collate_fn=my_collate, num_workers=0)
 
     return train_loader, test_loader, dataset
 
