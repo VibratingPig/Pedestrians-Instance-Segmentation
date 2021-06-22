@@ -62,7 +62,7 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
 class Pedestrian_Segmentation:
     def __init__(self):
 
-        self.device = 'cpu'
+        self.device = 'cuda'
 
         # Hyperparameters
         self.root = 'Kaggle'
@@ -70,7 +70,7 @@ class Pedestrian_Segmentation:
 
         self.batch_size = 1
         self.learning_rate = 0.005
-        self.epochs = 1
+        self.epochs = 2
 
         self.split_dataset_factor = 0.7
 
@@ -136,6 +136,7 @@ class Pedestrian_Segmentation:
         self.frame1.configure(height='200', width='200')
         self.frame1.pack(side='top')
         self.mainwindow = self.frame1
+        self.feature_changed(0)
 
     def feature_changed(self, scale_value):
         self.feature_value = round(float(scale_value))
@@ -146,17 +147,17 @@ class Pedestrian_Segmentation:
 
     def scale_changed(self, scale_value):
         self.threshold = round(float(scale_value))
-        image= self.plot_feature(self.feature_value, threshold = self.threshold)
+        image= self.plot_feature(self.feature_value, threshold = self.threshold, recalc=False)
         photo_image = ImageTk.PhotoImage(Image.fromarray(image.numpy().astype('uint8'), mode = 'RGB'))
         self.label1.configure(image=photo_image)
         self.label1.image = photo_image
 
-    def plot_feature(self, index, threshold=125, positive_value=255, negative_value=0):
+    def plot_feature(self, index, threshold=125, positive_value=255, negative_value=0, recalc=True):
         #
         device = torch.device(self.device)
-        L = self.run_backwards()
-
-        image = self.outputs[1].tensors[0].cpu().detach()
+        if recalc:
+            L = self.run_backwards()
+            self.image = self.outputs[1].tensors[0].cpu().detach()
 
         print(f'Setting index to {index} and {threshold}')
         # self.mask_RCNN.backbone.body.conv1.register_forward_hook(self.hook_cls.hook)
@@ -180,8 +181,9 @@ class Pedestrian_Segmentation:
         # my_zeros = my_zeros.cpu()
         # we are interested in the gradient value - this isn't the gradient function
         # detach to remove it from the graph and play with it
-        gradient = self.outputs[1].tensors.grad.cpu().detach()[0]  # there will only ever be on grad
-        gradient_image = gradient.permute(1, 2, 0)
+        if recalc or not hasattr(self, "gradient"):
+           self.gradient = self.outputs[1].tensors.grad.cpu().detach()[0]  # there will only ever be on grad
+        gradient_image = self.gradient.permute(1, 2, 0)
         #sum over third dimension
         # gradient_image = gradient_image.sum(2)
 
@@ -201,7 +203,7 @@ class Pedestrian_Segmentation:
 
         # apply threshold to the image after we have convolved it and normalized it
 
-        tensor_image = image.permute(1, 2, 0)
+        tensor_image = self.image.permute(1, 2, 0)
         # tensor_image = tensor_image.sum(2)
 
         # here we perform sensitivity analysis to find out the changes in the image
@@ -210,7 +212,7 @@ class Pedestrian_Segmentation:
 
         # Deep taylor expansion is * not +
         convolved_image = gradient_image * tensor_image
-        # convolved_image = tensor_image
+        # convolved_image = gradient_image
         # filter all colors below a certain level - the level is the strength of the activation hence feature
         # strength
 
@@ -265,7 +267,7 @@ class Pedestrian_Segmentation:
             if count > 0:
                 break
 
-        # move everyting to CPU
+        # move everything to CPU
         device = torch.device('cpu')
         images = list(image.to(device) for image in images)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
