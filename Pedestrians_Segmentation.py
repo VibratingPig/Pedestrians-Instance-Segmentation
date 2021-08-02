@@ -70,7 +70,7 @@ class Pedestrian_Segmentation:
         # self.root = "PennFudanPed"
         self.transform = transforms.Compose([transforms.ToTensor()])
 
-        step_size = 10
+        step_size = 20
         self.batch_size = 1
         self.learning_rate = 0.005
         self.epochs = 20 * step_size # make it a multiple of three for the step size
