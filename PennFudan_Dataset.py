@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import ast
 
+scale = 800 / 2770
+
 
 class MaskCreator():
 
@@ -124,6 +126,13 @@ class PennnFudanDataset(Dataset):
                     y = int(boundary_boxes['y'])
                     x_width = int(boundary_boxes['width'])
                     y_height = int(boundary_boxes['height'])
+
+                    # PG temporary scaling to 800 px wide
+                    x = int(scale * x)
+                    y = int(scale * y)
+                    x_width = int(scale * x_width)
+                    y_height = int (scale * y_height)
+
                     print(f'For {image_name} setting {x},{y} to {x+x_width}, {y+y_height} for {x_width} and {y_height}')
                     boxes.append([x, y, x + x_width, y + y_height])
                     area.append(x_width * y_height)
