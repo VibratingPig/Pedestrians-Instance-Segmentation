@@ -73,7 +73,7 @@ class Pedestrian_Segmentation:
         step_size = 20
         self.batch_size = 1
         self.learning_rate = 0.005
-        self.epochs = 20 * step_size # make it a multiple of three for the step size
+        self.epochs = 3 * step_size # make it a multiple of three for the step size
 
         self.split_dataset_factor = 0.7
 
@@ -464,8 +464,8 @@ model.load()
 # #
 # # # Test
 index = 0
-root = "Kaggle/Test"
-paths = sorted(os.listdir("Kaggle/Test"))
+root = f"{model.root}/Test"
+paths = sorted(os.listdir(f"{model.root}/Test"))
 path = os.path.join(root, paths[index])
 
 model.detect(path)
