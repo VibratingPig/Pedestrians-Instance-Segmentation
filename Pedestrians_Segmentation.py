@@ -32,6 +32,9 @@ class ForwardHookCapture:
         self.inputs = input
 
 def mask_rcnn_transfer_learning(is_finetune: bool):
+
+    # PG do not use the coco data set but train from the ground up
+    # set pretrained to False
     mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True)
 
     # just train the modified layers
@@ -67,10 +70,10 @@ class Pedestrian_Segmentation:
 
         # Hyperparameters
         self.root = 'test'
-        # self.root = "PennFudanPed"
+        self.root = "PennFudanPed"
         self.transform = transforms.Compose([transforms.ToTensor()])
 
-        step_size = 20
+        step_size = 3
         self.batch_size = 1
         self.learning_rate = 0.005
         self.epochs = 3 * step_size # make it a multiple of three for the step size
@@ -162,7 +165,7 @@ class Pedestrian_Segmentation:
             L = self.run_backwards()
             self.image = self.outputs[1].tensors[0].cpu().detach()
 
-        print(f'Setting index to {index} and {threshold}')
+        # print(f'Setting index to {index} and {threshold}')
         # self.mask_RCNN.backbone.body.conv1.register_forward_hook(self.hook_cls.hook)
         # self.outputs = self.mask_RCNN(self.images, self.targets)
         my_zeros = torch.zeros(1, 64, 400, 432)
@@ -232,7 +235,7 @@ class Pedestrian_Segmentation:
         # convolved_image[:, :, 0] = torch.where(convolved_image[:, :, 0] > threshold, positive_value, negative_value)
         # convolved_image[:, :, 1] = torch.where(convolved_image[:, :, 1] > threshold, positive_value, negative_value)
         # convolved_image[:, :, 2] = torch.where(convolved_image[:, :, 2] > threshold, positive_value, negative_value)
-        print(f'Sum of gradient is {gradient_image.sum()}')
+        # print(f'Sum of gradient is {gradient_image.sum()}')
 
         # plt.imshow(tensor_image.int().sum(2))
         # plt.show()
@@ -434,7 +437,7 @@ class Pedestrian_Segmentation:
             # if count > 0:
             #     break
 
-        cv2.imshow("original", original)
+        # cv2.imshow("original", original)
         cv2.imshow("masked", img)
 
         cv2.waitKey(0)
