@@ -47,7 +47,7 @@ class PennnFudanDataset(Dataset):
         if self.use_masks:
             mask = Image.open(self.masksPaths[index])
 
-        image = image.convert("RGB")
+        # image = image.convert("RGB")
 
         # We get the boxes from the masks instead of reading it from a CSV file
 
@@ -108,11 +108,12 @@ class PennnFudanDataset(Dataset):
             df = pd.read_csv('./Kaggle/PedMasks/train_image_level.csv')
 
             image_id = image_name.split('.')[0] + "_image"
+            # print(f'considering image {image_id}')
             row = df[df.id == image_id]
             oo = np.zeros([1, image.width, image.height])
             # row.boxes is a pandas series
             for box in row.boxes:
-                print(f'Attempting to literally parse box {box} for {image_id}')
+                # print(f'Attempting to literally parse box {box} for {image_id}')
                 # we have no bounding boxes for some of these images and they should report nothing
                 # for the purposes of our training we ignore them
 
@@ -141,7 +142,7 @@ class PennnFudanDataset(Dataset):
                     x_width = int(scale * x_width)
                     y_height = int (scale * y_height)
 
-                    print(f'For {image_name} setting {x},{y} to {x+x_width}, {y+y_height} for {x_width} and {y_height}')
+                    # print(f'For {image_name} setting {x},{y} to {x+x_width}, {y+y_height} for {x_width} and {y_height}')
                     boxes.append([x, y, x + x_width, y + y_height])
                     area.append(x_width * y_height)
                     oo[i, x:(x+x_width), y:(y+y_height)] = i + 1
@@ -198,8 +199,12 @@ class PennnFudanDataset(Dataset):
         target["image_id"] = image_id
         target["iscrowd"] = iscrowd
 
-        if self.transform is not None:
-            image = self.transform(image)
+        try:
+            if self.transform is not None:
+                image = self.transform(image)
+        except:
+            print(f'image resize failed returning none {image_id}')
+            return None
 
         return image, target
 

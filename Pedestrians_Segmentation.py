@@ -27,7 +27,7 @@ class ForwardHookCapture:
         # at this point we have a tensor which is 400x432x64 - how do we represent that
         # we can't send it to plot.imshow - so how do we reduce the dimensionality
 
-        print('this is the second run forward - we need to understand how to backprop the relevance')
+        # print('this is the second run forward - we need to understand how to backprop the relevance')
         self.output = output
         self.inputs = input
 
@@ -65,18 +65,18 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
 class Pedestrian_Segmentation:
     def __init__(self):
 
-        self.device = 'cpu'
+        self.device = 'cuda'
         self.ui = False
 
         # Hyperparameters
         # can be test/PennFundanPed/Kaggle
-        self.root = 'Kaggle'
+        self.root = 'test'
         self.transform = transforms.Compose([transforms.ToTensor()])
 
-        step_size = 3
-        self.batch_size = 10
-        self.learning_rate = 0.005
-        self.epochs = 3 * step_size # make it a multiple of three for the step size
+        step_size = 80
+        self.batch_size = 1
+        self.learning_rate = 0.0005
+        self.epochs = 2 * step_size # make it a multiple of three for the step size
 
         self.split_dataset_factor = 1.0
 
@@ -150,13 +150,18 @@ class Pedestrian_Segmentation:
         photo_image = ImageTk.PhotoImage(Image.fromarray(image.numpy().astype('uint8'), mode = 'RGB'))
         self.label1.configure(image=photo_image)
         self.label1.image = photo_image
+        self.label1.pack(side='top')
+        self.frame1.pack(side='top')
 
     def scale_changed(self, scale_value):
         self.threshold = round(float(scale_value))
         image= self.plot_feature(self.feature_value, threshold = self.threshold, recalc=False)
-        photo_image = ImageTk.PhotoImage(Image.fromarray(image.numpy().astype('uint8'), mode = 'RGB'))
+        photo_image = ImageTk.PhotoImage(imaGe = Image.fromarray(image.numpy().astype('uint8'), size = (640, 480),
+                                                                 mode = 'RGB'))
         self.label1.configure(image=photo_image)
         self.label1.image = photo_image
+        self.label1.pack(side='top')
+        self.frame1.pack(side='top')
 
     def plot_feature(self, index, threshold=125, positive_value=255, negative_value=0, recalc=True):
         #
@@ -246,7 +251,10 @@ class Pedestrian_Segmentation:
 
         count = 0
         device = torch.device(self.device)
-        bathes_per_epoch = len(self.dataset) / self.batch_size
+        batches_per_epoch = len(self.dataset)
+        if self.batch_size:
+            batches_per_epoch = len(self.dataset) / self.batch_size
+
         for i, (images, targets) in enumerate(self.train_loader):
             # PG At this point the iages are a list of two images which appear to have different sizes
             # 3 channels for RGB and 341x414 and 482x550
@@ -254,24 +262,26 @@ class Pedestrian_Segmentation:
             # boxes look like 2x4 tensor - so one for each image and 4 coordinates
             # masks appear to be boolean and sized to the smaller of the two images 341 x 414.
             # squirt them down to the card taken from the torchvision reference impl.
-            images = list(image.to(device) for image in images)
-            targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+            if images: # could be none
+                images = list(image.to(device) for image in images)
+                targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
-            self.images = images
-            self.targets = targets
+                self.images = images
+                self.targets = targets
 
-            # model in training mode accepts both input and output and return the loss of all types
-            # PG See torchvision.models.detection.transform.GeneralizedRCNNTransform for the transformation applied
-            # it does resize, mean shifts and std deviations shift the images prior to use.
-            L = self.run_backwards()
+                # model in training mode accepts both input and output and return the loss of all types
+                # PG See torchvision.models.detection.transform.GeneralizedRCNNTransform for the transformation applied
+                # it does resize, mean shifts and std deviations shift the images prior to use.
+                L = self.run_backwards()
 
-            self.optimizer.step()
-            self.optimizer.zero_grad()
+                self.optimizer.step()
+                self.optimizer.zero_grad()
 
-            print("Loss = ", L.item(), " batch = ", i, "/", bathes_per_epoch)
-            count += 1
-            if count > 0:
-                break
+                print("Loss = ", L.item(), " batch = ", i, "/", batches_per_epoch)
+                count += 1
+                if count > 2:
+                    print('batch greater than 2 - breaking out of loop')
+                    break
 
         # move everything to CPU
         device = torch.device('cpu')
@@ -303,12 +313,12 @@ class Pedestrian_Segmentation:
         t1 = time.time()
 
         for epoch in range(self.epochs):
-            print(epoch + 1, "/", self.epochs)
+            print('############################# ', epoch + 1, "/", self.epochs)
             self.train_one_epoch(images)
             self.lr_scheduler.step()
 
-        t2 = time.time() - t1
-        print("time = ", t2)
+        # t2 = time.time() - t1
+        # print("time = ", t2)
 
         self.mask_RCNN.backbone.body.conv1.register_forward_hook(self.hook_cls.hook)
         self.outputs = model.mask_RCNN(self.images, self.targets)
@@ -338,7 +348,7 @@ class Pedestrian_Segmentation:
         device = torch.device(self.device)
         with torch.no_grad():
             for i, (image, target) in enumerate(self.test_loader):
-                print(f"sample evaluation {i}")
+                # print(f"sample evaluation {i}")
                 # we had 1 sample in the batch (batch size of test loader = 1)
 
                 output = self.mask_RCNN(image.to(device))[0]
@@ -385,7 +395,7 @@ class Pedestrian_Segmentation:
             Recall = all_true_positives / all_true_boxes
             Percesion = all_true_positives / (all_false_positives + all_true_positives + 1e-5)
 
-            print(f"Recall = {Recall} & Percesion = {Percesion} ")
+            # print(f"Recall = {Recall} & Percesion = {Percesion} ")
             return Recall, Percesion
 
     def save(self):
@@ -438,38 +448,26 @@ class Pedestrian_Segmentation:
             #     break
 
         # cv2.imshow("original", original)
-        cv2.imshow("masked", img)
+        # cv2.imshow("masked", img)
+        cv2.imwrite('./test.png', img)
 
-        cv2.waitKey(0)
-
-    def foo(self):
-        scriptmodule = torch.jit.script(self.mask_RCNN)
-        scriptmodule.cpu()
-        print(self.mask_RCNN)
-
+        # cv2.waitKey(0)
 
 model = Pedestrian_Segmentation()
-print(model.mask_RCNN)
-# model.foo()
 
-images = []
-model.train(images)
-model.save()
-model.load()
+train = False
 
-# model.build_ui()
-# model.mainwindow.mainloop()
+if train:
+    images = []
+    model.train(images)
+    model.save()
+else:
+    # # # Test
+    model.load()
+    index = 0
+    root = f"{model.root}/Test"
+    paths = sorted(os.listdir(f"{model.root}/Test"))
+    path = os.path.join(root, paths[index])
 
-# we hook into the module and re-run the forward pass after modifying for the gradient - we should
-# start to see patterns here
-
-#
-# #
-# # # Test
-index = 0
-root = f"{model.root}/Test"
-paths = sorted(os.listdir(f"{model.root}/Test"))
-path = os.path.join(root, paths[index])
-
-model.detect(path)
+    model.detect(path)
 # #
