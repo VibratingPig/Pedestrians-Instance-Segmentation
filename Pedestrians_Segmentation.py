@@ -66,11 +66,11 @@ class Pedestrian_Segmentation:
     def __init__(self):
 
         self.device = 'cuda'
-        self.ui = True
+        self.ui = False
 
         # Hyperparameters
-        self.root = 'test'
-        self.root = "PennFudanPed"
+        # can be test/PennFundanPed/Kaggle
+        self.root = 'Kaggle'
         self.transform = transforms.Compose([transforms.ToTensor()])
 
         step_size = 3
