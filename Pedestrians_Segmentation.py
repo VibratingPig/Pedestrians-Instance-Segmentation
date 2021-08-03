@@ -66,7 +66,7 @@ class Pedestrian_Segmentation:
         self.ui = True
 
         # Hyperparameters
-        self.root = 'Kaggle'
+        self.root = 'test'
         # self.root = "PennFudanPed"
         self.transform = transforms.Compose([transforms.ToTensor()])
 
@@ -75,7 +75,7 @@ class Pedestrian_Segmentation:
         self.learning_rate = 0.005
         self.epochs = 3 * step_size # make it a multiple of three for the step size
 
-        self.split_dataset_factor = 0.7
+        self.split_dataset_factor = 1.0
 
         # dataset
         # test_batch_size = 1 for looping over single sample

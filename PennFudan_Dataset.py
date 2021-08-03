@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import ast
 
-scale = 800 / 2770
 
 
 class MaskCreator():
@@ -72,8 +71,6 @@ class PennnFudanDataset(Dataset):
             # N Boxes
             N = len(IDs)
 
-            # PG Hard code these for now
-
             for i in range(N):
                 # where gets the pixels where the mask = True (mask is a 2D Array of true and false ,
                 # true at the pixels that is 1 as an indication of the mask & 0 for background)
@@ -128,6 +125,8 @@ class PennnFudanDataset(Dataset):
                     y_height = int(boundary_boxes['height'])
 
                     # PG temporary scaling to 800 px wide
+                    scale = 800 / 2770
+
                     x = int(scale * x)
                     y = int(scale * y)
                     x_width = int(scale * x_width)
