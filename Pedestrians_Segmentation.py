@@ -65,7 +65,7 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
 class Pedestrian_Segmentation:
     def __init__(self):
 
-        self.device = 'cuda'
+        self.device = 'cpu'
         self.ui = False
 
         # Hyperparameters
@@ -74,7 +74,7 @@ class Pedestrian_Segmentation:
         self.transform = transforms.Compose([transforms.ToTensor()])
 
         step_size = 3
-        self.batch_size = 1
+        self.batch_size = 10
         self.learning_rate = 0.005
         self.epochs = 3 * step_size # make it a multiple of three for the step size
 

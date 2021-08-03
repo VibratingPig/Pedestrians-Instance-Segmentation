@@ -5,7 +5,7 @@ from PIL import Image
 import numpy as np
 import pandas as pd
 import ast
-
+import math
 
 
 class MaskCreator():
@@ -112,7 +112,16 @@ class PennnFudanDataset(Dataset):
             oo = np.zeros([1, image.width, image.height])
             # row.boxes is a pandas series
             for box in row.boxes:
-                list_of_dictionaries = ast.literal_eval(box)
+                print(f'Attempting to literally parse box {box} for {image_id}')
+                # we have no bounding boxes for some of these images and they should report nothing
+                # for the purposes of our training we ignore them
+
+                try:
+                    list_of_dictionaries = ast.literal_eval(box)
+                except:
+                    print(f'whatever reason cannot parse {box} for {image_id}')
+                    return None
+
                 N = len(list_of_dictionaries)
                 oo = np.zeros([N, image.size[0], image.size[1]])
                 for i, boundary_boxes in enumerate(list_of_dictionaries):

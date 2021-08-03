@@ -49,6 +49,8 @@ def intersection_over_union(box1, box2):
 # as default collate (which collect the images,targets of the patch) dosn't allow diffirent sizes
 
 def my_collate(batch):
+    # PG get rid of None's which are negative examples
+    batch = list(filter(None, batch))
     data = [item[0] for item in batch]
     target = [item[1] for item in batch]
     return [data, target]
