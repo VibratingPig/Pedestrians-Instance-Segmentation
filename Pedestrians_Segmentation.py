@@ -31,11 +31,11 @@ class ForwardHookCapture:
         self.output = output
         self.inputs = input
 
-def mask_rcnn_transfer_learning(is_finetune: bool):
 
+def mask_rcnn_transfer_learning(is_finetune: bool):
     # PG do not use the coco data set but train from the ground up
     # set pretrained to False
-    mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True)
+    mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=False)
 
     # just train the modified layers
     if not is_finetune:
@@ -66,17 +66,17 @@ class Pedestrian_Segmentation:
     def __init__(self):
 
         self.device = 'cuda'
-        self.ui = False
+        self.ui = True
 
         # Hyperparameters
         # can be test/PennFundanPed/Kaggle
         self.root = 'test'
         self.transform = transforms.Compose([transforms.ToTensor()])
 
-        step_size = 80
+        step_size = 20
         self.batch_size = 1
-        self.learning_rate = 0.0005
-        self.epochs = 2 * step_size # make it a multiple of three for the step size
+        self.learning_rate = 0.00005
+        self.epochs = 2 * step_size  # make it a multiple of three for the step size
 
         self.split_dataset_factor = 1.0
 
@@ -86,7 +86,7 @@ class Pedestrian_Segmentation:
                                                                                 self.root, self.split_dataset_factor)
 
         # model
-        self.mask_RCNN = mask_rcnn_transfer_learning(is_finetune=True)
+        self.mask_RCNN = mask_rcnn_transfer_learning(is_finetune=False)
         device = torch.device(self.device)
         self.mask_RCNN.to(device)
 
@@ -111,11 +111,10 @@ class Pedestrian_Segmentation:
         self.threshold = 0
         self.feature_value = 0
 
+        self.losses = []
+
     def build_ui(self):
         self.frame1 = ttk.Frame(tk.Tk())
-        self.label1 = ttk.Label(self.frame1)
-        self.label1.configure(text='image to go here')
-        self.label1.pack(side='top')
         self.frame2 = ttk.Frame(self.frame1)
         self.frame3 = ttk.Frame(self.frame2)
         self.label2 = ttk.Label(self.frame3)
@@ -139,6 +138,9 @@ class Pedestrian_Segmentation:
         self.frame4.grid(column='0', row='1')
         self.frame2.configure(height='200', width='200')
         self.frame2.pack(side='top')
+        self.label1 = ttk.Label(self.frame1)
+        self.label1.configure(text='image to go here')
+        self.label1.pack(side='top')
         self.frame1.configure(height='200', width='200')
         self.frame1.pack(side='top')
         self.mainwindow = self.frame1
@@ -146,8 +148,8 @@ class Pedestrian_Segmentation:
 
     def feature_changed(self, scale_value):
         self.feature_value = round(float(scale_value))
-        image = self.plot_feature(self.feature_value, threshold = self.threshold)
-        photo_image = ImageTk.PhotoImage(Image.fromarray(image.numpy().astype('uint8'), mode = 'RGB'))
+        image = self.plot_feature(self.feature_value, threshold=self.threshold)
+        photo_image = ImageTk.PhotoImage(image=Image.fromarray(image.numpy().astype('uint8'), mode='RGB'))
         self.label1.configure(image=photo_image)
         self.label1.image = photo_image
         self.label1.pack(side='top')
@@ -155,9 +157,9 @@ class Pedestrian_Segmentation:
 
     def scale_changed(self, scale_value):
         self.threshold = round(float(scale_value))
-        image= self.plot_feature(self.feature_value, threshold = self.threshold, recalc=False)
-        photo_image = ImageTk.PhotoImage(imaGe = Image.fromarray(image.numpy().astype('uint8'), size = (640, 480),
-                                                                 mode = 'RGB'))
+        image = self.plot_feature(self.feature_value, threshold=self.threshold, recalc=False)
+        photo_image = ImageTk.PhotoImage(image=Image.fromarray(image.numpy().astype('uint8'),
+                                                               mode='RGB'))
         self.label1.configure(image=photo_image)
         self.label1.image = photo_image
         self.label1.pack(side='top')
@@ -193,9 +195,9 @@ class Pedestrian_Segmentation:
         # we are interested in the gradient value - this isn't the gradient function
         # detach to remove it from the graph and play with it
         if recalc or not hasattr(self, "gradient"):
-           self.gradient = self.outputs[1].tensors.grad.cpu().detach()[0]  # there will only ever be on grad
+            self.gradient = self.outputs[1].tensors.grad.cpu().detach()[0]  # there will only ever be on grad
         gradient_image = self.gradient.permute(1, 2, 0)
-        #sum over third dimension
+        # sum over third dimension
         # gradient_image = gradient_image.sum(2)
 
         # OMG - this is a pain in the a&$e
@@ -262,7 +264,7 @@ class Pedestrian_Segmentation:
             # boxes look like 2x4 tensor - so one for each image and 4 coordinates
             # masks appear to be boolean and sized to the smaller of the two images 341 x 414.
             # squirt them down to the card taken from the torchvision reference impl.
-            if images: # could be none
+            if images:  # could be none
                 images = list(image.to(device) for image in images)
                 targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
@@ -278,6 +280,7 @@ class Pedestrian_Segmentation:
                 self.optimizer.zero_grad()
 
                 print("Loss = ", L.item(), " batch = ", i, "/", batches_per_epoch)
+                self.losses.append(L.item())
                 count += 1
                 if count > 2:
                     print('batch greater than 2 - breaking out of loop')
@@ -323,6 +326,8 @@ class Pedestrian_Segmentation:
         self.mask_RCNN.backbone.body.conv1.register_forward_hook(self.hook_cls.hook)
         self.outputs = model.mask_RCNN(self.images, self.targets)
 
+        plt.plot(self.losses, label='Losses')
+        plt.show()
         if self.ui:
             self.build_ui()
             self.mainwindow.mainloop()
@@ -453,9 +458,10 @@ class Pedestrian_Segmentation:
 
         # cv2.waitKey(0)
 
+
 model = Pedestrian_Segmentation()
 
-train = False
+train = True
 
 if train:
     images = []
