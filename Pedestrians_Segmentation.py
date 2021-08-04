@@ -48,7 +48,7 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
     in_features_mask = mask_RCNN.roi_heads.mask_predictor.conv5_mask.in_channels
 
     # same num of conv5_mask output
-    hidden_layer = 256
+    hidden_layer = 1 # the lower the better at this point
 
     # num_classes = 0 (background) + 1 (person) === 2
     fastRCNN_TransferLayer = FastRCNNPredictor(in_channels=in_features_classes_fc, num_classes=2)
@@ -65,17 +65,18 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
 class Pedestrian_Segmentation:
     def __init__(self):
 
-        self.device = 'cuda'
+        self.device = 'cpu'
         self.ui = True
 
         # Hyperparameters
         # can be test/PennFundanPed/Kaggle
-        self.root = 'test'
+        self.root = 'Kaggle'
         self.transform = transforms.Compose([transforms.ToTensor()])
 
-        step_size = 20
+        gamma = 0.5 # the amount the learning rate reduces each step
+        step_size = 64
         self.batch_size = 1
-        self.learning_rate = 0.00005
+        self.learning_rate = 0.0005
         self.epochs = 2 * step_size  # make it a multiple of three for the step size
 
         self.split_dataset_factor = 1.0
@@ -100,7 +101,7 @@ class Pedestrian_Segmentation:
         # optimizer & lr_scheduler
         self.optimizer = torch.optim.SGD(self.parameters, lr=self.learning_rate)
         # step rate 3 means every third iteration it reduces by a factor of 0.1 or 10%
-        self.lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer=self.optimizer, step_size=step_size, gamma=0.1)
+        self.lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer=self.optimizer, step_size=step_size, gamma=gamma)
 
         # path to save / load weights
         self.weights_path = "./weights.pth"
@@ -282,7 +283,7 @@ class Pedestrian_Segmentation:
                 print("Loss = ", L.item(), " batch = ", i, "/", batches_per_epoch)
                 self.losses.append(L.item())
                 count += 1
-                if count > 2:
+                if count > 0:
                     print('batch greater than 2 - breaking out of loop')
                     break
 
@@ -461,7 +462,7 @@ class Pedestrian_Segmentation:
 
 model = Pedestrian_Segmentation()
 
-train = True
+train = False
 
 if train:
     images = []
