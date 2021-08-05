@@ -47,6 +47,9 @@ class PennnFudanDataset(Dataset):
         if self.use_masks:
             mask = Image.open(self.masksPaths[index])
 
+        # PG Flag for not processing boxes
+        is_not_covid = False
+
         # image = image.convert("RGB")
 
         # We get the boxes from the masks instead of reading it from a CSV file
@@ -72,39 +75,17 @@ class PennnFudanDataset(Dataset):
             N = len(IDs)
 
             for i in range(N):
-                # where gets the pixels where the mask = True (mask is a 2D Array of true and false ,
-                # true at the pixels that is 1 as an indication of the mask & 0 for background)
                 mask_pixels = np.where(masks[i])
 
-                # extract the box from the min & max of these points
-                # first dim is y , second dim is x
                 xmin = np.min(mask_pixels[1])
                 xmax = np.max(mask_pixels[1])
                 ymin = np.min(mask_pixels[0])
                 ymax = np.max(mask_pixels[0])
 
-                # PG This is where the boxes are appended - it's worked out from the mask png
-                # if we don't have that then we can support the relevant xmin, xmax, ymin and ymax
-                # to teh
                 boxes.append([xmin, ymin, xmax, ymax])
                 area.append((ymax - ymin) * (xmax - xmin))
 
         if not self.use_masks:
-            # PG Hard coded from train_image_level.csv
-            # xmin = 2753
-            # ymin = 906
-            # xmax = xmin + 1058
-            # ymax = ymin + 1672
-            # boxes.append([xmin, ymin, xmax, ymax])
-            # area.append((ymax-ymin) * (xmax-xmin))
-            #
-            # xmin = 788
-            # ymin = 820
-            # xmax = xmin + 1144
-            # ymax = ymin + 1879
-            # boxes.append([xmin, ymin, xmax, ymax])
-            # area.append((ymax-ymin) * (xmax-xmin))
-
             df = pd.read_csv('./Kaggle/PedMasks/train_image_level.csv')
 
             image_id = image_name.split('.')[0] + "_image"
@@ -112,6 +93,7 @@ class PennnFudanDataset(Dataset):
             row = df[df.id == image_id]
             oo = np.zeros([1, image.width, image.height])
             # row.boxes is a pandas series
+
             for box in row.boxes:
                 # print(f'Attempting to literally parse box {box} for {image_id}')
                 # we have no bounding boxes for some of these images and they should report nothing
@@ -119,77 +101,63 @@ class PennnFudanDataset(Dataset):
 
                 try:
                     list_of_dictionaries = ast.literal_eval(box)
+                    N = len(list_of_dictionaries)
+                    oo = np.zeros([N, image.size[0], image.size[1]])
+                    for i, boundary_boxes in enumerate(list_of_dictionaries):
+                        x = int(boundary_boxes['x'])
+                        y = int(boundary_boxes['y'])
+                        x_width = int(boundary_boxes['width'])
+                        y_height = int(boundary_boxes['height'])
+
+                        # print(f'For {image_name} setting {x},{y} to {x+x_width}, {y+y_height} for {x_width} and {y_height}')
+                        boxes.append([x, y, x + x_width, y + y_height])
+                        area.append(x_width * y_height)
+                        oo[i, x:(x + x_width), y:(y + y_height)] = i + 1
                 except:
+                    is_not_covid = True
                     print(f'whatever reason cannot parse {box} for {image_id}')
-                    return None
+                    # return None
 
-                N = len(list_of_dictionaries)
-                oo = np.zeros([N, image.size[0], image.size[1]])
-                for i, boundary_boxes in enumerate(list_of_dictionaries):
-                    # box is a string representation of the bounds
-                    # its a list of dictionaries
+            if not is_not_covid:
+                IDs = np.unique(np.array(oo))
+                IDs = IDs[1:]
+                IDs = IDs.reshape(-1, 1, 1)
+                masks = np.array(oo) == IDs
 
-                    x = int(boundary_boxes['x'])
-                    y = int(boundary_boxes['y'])
-                    x_width = int(boundary_boxes['width'])
-                    y_height = int(boundary_boxes['height'])
+        if not is_not_covid:
+            # convert 2D List to 2D Tensor (this is not numpy array)
+            boxes = torch.as_tensor(boxes, dtype=torch.float32)
+            area = torch.as_tensor(area, dtype=torch.float32)
 
-                    # PG temporary scaling to 800 px wide
-                    scale = 800 / 2770
+            # labels for each box
+            # there is only 1 class (pedestrian) so it will always be 1 (if multiple classes, so we will assign 1,2,3 ... etc to each one)
+            labels = torch.ones((N,), dtype=torch.int64)
 
-                    x = int(scale * x)
-                    y = int(scale * y)
-                    x_width = int(scale * x_width)
-                    y_height = int (scale * y_height)
+            # image_id requirement for model, index is unique for every image
+            image_id = torch.tensor([index], dtype=torch.int64)
 
-                    # print(f'For {image_name} setting {x},{y} to {x+x_width}, {y+y_height} for {x_width} and {y_height}')
-                    boxes.append([x, y, x + x_width, y + y_height])
-                    area.append(x_width * y_height)
-                    oo[i, x:(x+x_width), y:(y+y_height)] = i + 1
+            # instances with iscrowd=True will be ignored during evaluation.
+            # set all = False (zeros)
+            iscrowd = torch.zeros((N,), dtype=torch.uint8)
 
-                # this is the number of masks/bounding boxes not the number of images.
+            # convert masks to tensor (model requirement)
+            masks = torch.as_tensor(masks, dtype=torch.uint8)
 
-            # create an array of size X * Y and then set the range of the mask
-            # x[1,1:1,] = 1
-            # size of image
-            # note that the masks are multidimensional array and the supplied
-            # mask png sets mask 1 to value 1 and mask 2 to value 2 etc. to produce a multidimensional
-            # array
-            # indexed from 0
-            # box 2
-            # oo[0, 788:1932, 820:2699] = 2
-            # then do a boolean x_prime = x[==True]
-            # you can pass an array and it returns an multi dimensional array
-            IDs = np.unique(np.array(oo))
-            # remove the background ID
-            IDs = IDs[1:]
-
-            # transpose it to (N,1,1) to be similar to a column vector
-            IDs = IDs.reshape(-1, 1, 1)
-
-            masks = np.array(oo) == IDs
-            # masks = (oo == [[1],[2]])
-
-        # convert 2D List to 2D Tensor (this is not numpy array)
-        boxes = torch.as_tensor(boxes, dtype=torch.float32)
-        area = torch.as_tensor(area, dtype=torch.float32)
-
-        # labels for each box
-        # there is only 1 class (pedestrian) so it will always be 1 (if multiple classes, so we will assign 1,2,3 ... etc to each one)
-        labels = torch.ones((N,), dtype=torch.int64)
-
-        # image_id requirement for model, index is unique for every image
-        image_id = torch.tensor([index], dtype=torch.int64)
-
-        # instances with iscrowd=True will be ignored during evaluation.
-        # set all = False (zeros)
-        iscrowd = torch.zeros((N,), dtype=torch.uint8)
-
-        # convert masks to tensor (model requirement)
-        masks = torch.as_tensor(masks, dtype=torch.uint8)
-
-        # print("image size=", image.size)
-        # print("mask size=", mask.size)
+            # print("image size=", image.size)
+            # print("mask size=", mask.size)
+        else:
+            # PG make the entire image a mask
+            oo = np.zeros([1, image.width, image.height])
+            masks = np.array(oo) == 0
+            # there is no covid here and we need the network to train for that...
+            boxes.append([0,0,10,10])
+            area.append(10 * 10)
+            masks = torch.as_tensor(masks, dtype=torch.uint8)
+            boxes = torch.as_tensor(boxes, dtype=torch.float32)
+            area = torch.as_tensor(area, dtype=torch.float32)
+            labels = torch.zeros((1,), dtype=torch.int64)
+            iscrowd = torch.zeros((1,), dtype=torch.uint8)
+            image_id = torch.tensor([index], dtype=torch.int64)
 
         target = {}
         target["boxes"] = boxes

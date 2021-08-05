@@ -35,7 +35,7 @@ class ForwardHookCapture:
 def mask_rcnn_transfer_learning(is_finetune: bool):
     # PG do not use the coco data set but train from the ground up
     # set pretrained to False
-    mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=False)
+    mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True)
 
     # just train the modified layers
     if not is_finetune:
@@ -63,24 +63,28 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
     return mask_RCNN
 
 
-train = True  # used to switch script from train to eval
-
+train = False  # used to switch script from train to eval
 
 class Pedestrian_Segmentation:
     def __init__(self):
 
-        self.device = 'cuda'
+        self.device = 'cpu'
         self.ui = True
 
         # Hyperparameters
         # can be test/PennFundanPed/Kaggle
-        self.root = 'test2'
+        self.root = 'Kaggle'
         self.transform = transforms.Compose([transforms.ToTensor()])
 
+        self.max_count_to_train = 1e6 # high number means no breaking
+        # filter for incoming masks on detection - the value must be greater than this
+        self.mask_weight = 0.5
+        # threshould for bounding box evaluation
+        self.IoU_threshold = 0.25
         gamma = 0.5  # the amount the learning rate reduces each step
-        step_size = 16
+        step_size = 128
         self.batch_size = 1
-        self.learning_rate = 0.05
+        self.learning_rate = 0.005
         self.epochs = 2 * step_size  # make it a multiple of three for the step size
 
         self.split_dataset_factor = 1.0
@@ -110,8 +114,6 @@ class Pedestrian_Segmentation:
         # path to save / load weights
         self.weights_path = "./weights.pth"
 
-        # threshould for bounding box evaluation
-        self.IoU_threshould = 0.5
         self.hook_cls = ForwardHookCapture()
         self.threshold = 0
         self.feature_value = 0
@@ -271,7 +273,9 @@ class Pedestrian_Segmentation:
             # squirt them down to the card taken from the torchvision reference impl.
             if images:  # could be none
                 images = list(image.to(device) for image in images)
-                targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+                # [{print(f'{k} {v}') for k, v in t.items()} for t in targets if t is not None]
+
+                targets = [{k: v.to(device) for k, v in t.items()} for t in targets if t is not None]
 
                 self.images = images
                 self.targets = targets
@@ -287,8 +291,8 @@ class Pedestrian_Segmentation:
                 print("Loss = ", L.item(), " batch = ", i, "/", batches_per_epoch)
                 self.losses.append(L.item())
                 count += 1
-                if count > 0:
-                    print('batch greater than 2 - breaking out of loop')
+                if count > self.max_count_to_train:
+                    # print('batch greater than 2 - breaking out of loop')
                     break
 
         # move everything to CPU
@@ -305,8 +309,8 @@ class Pedestrian_Segmentation:
         L_mask = loss["loss_mask"]
         L_objectness = loss["loss_objectness"]
         L_rpn = loss["loss_rpn_box_reg"]
-        print(
-            f'loss classifier {L_cls} loss box {L_box} loss mask {L_mask} loss object {L_objectness} loss rpn {L_rpn}')
+        # print(
+        #     f'loss classifier {L_cls} loss box {L_box} loss mask {L_mask} loss object {L_objectness} loss rpn {L_rpn}')
         L = L_cls + L_box + L_mask + L_objectness + L_rpn
         L.backward()
         return L
@@ -337,77 +341,6 @@ class Pedestrian_Segmentation:
             self.build_ui()
             self.mainwindow.mainloop()
 
-    def eval(self):
-
-        # eval mode
-        self.mask_RCNN.eval()
-
-        # # using pycocotools
-        # device = torch.device(self.device)
-        # evaluate(self.mask_RCNN, self.test_loader, device)
-        # return
-
-        mA_Recall = 0
-        all_true_boxes = 0
-
-        # Wrong detections (< threshould)
-        FalsePositives = []
-        # Correct detections
-        TruePositives = []
-
-        device = torch.device(self.device)
-        with torch.no_grad():
-            for i, (image, target) in enumerate(self.test_loader):
-                # print(f"sample evaluation {i}")
-                # we had 1 sample in the batch (batch size of test loader = 1)
-
-                output = self.mask_RCNN(image.to(device))[0]
-                target = target[0]
-
-                detected_boxes = output["boxes"]
-                scores = output["scores"]
-                # labels = output["labels"] # not used in case of 1 class
-
-                true_boxes = target["boxes"]
-                # flags for already checked true boxes
-                checked_true_boxes = [False for i in range(len(true_boxes))]
-
-                for i_box, box in enumerate(detected_boxes):
-                    best_IoU = 0
-                    best_true_box = -1
-
-                    # get the best IoU with the true boxes
-                    for i_true_box, true_box in enumerate(true_boxes):
-                        IoU = intersection_over_union(box, true_box)
-
-                        if IoU > best_IoU:
-                            best_IoU = IoU
-                            best_true_box = i_true_box
-                    # ======================================
-
-                    # if the best IoU (best true box fit for that detected box) > threshould
-                    # check if the true box is already assigned to another box so it will be wrong (False Positive)
-                    # if not assigned -> Correct detection -> True Positive
-                    if best_IoU > self.IoU_threshould:
-                        if checked_true_boxes[best_true_box]:
-                            FalsePositives.append(i_box)
-                        else:
-                            TruePositives.append(i_box)
-                            checked_true_boxes[best_true_box] = True
-                    else:
-                        FalsePositives.append(i_box)
-
-                all_true_boxes += len(true_boxes)
-
-            all_true_positives = len(TruePositives)
-            all_false_positives = len(FalsePositives)
-
-            Recall = all_true_positives / all_true_boxes
-            Percesion = all_true_positives / (all_false_positives + all_true_positives + 1e-5)
-
-            # print(f"Recall = {Recall} & Percesion = {Percesion} ")
-            return Recall, Percesion
-
     def save(self):
         torch.save(self.mask_RCNN.state_dict(), self.weights_path)
 
@@ -415,8 +348,11 @@ class Pedestrian_Segmentation:
         weights = torch.load(self.weights_path)
         self.mask_RCNN.load_state_dict(weights)
 
-    def detect(self, path):
-
+    def detect(self, path:str, name: str):
+        """
+        run the forward inference using the path and the name
+        :type path: object
+        """
         transform = torchvision.transforms.ToTensor()
 
         image = Image.open(path)
@@ -435,8 +371,9 @@ class Pedestrian_Segmentation:
         # convert dark masking into one-hot labeled
         # masks contains 0 and a low gray value, so it will be considered as 0
         # convert to numpy to deal with it by openCV
-        masks = (output["masks"].cpu() >= 0.5).squeeze().numpy()
+        masks = (output["masks"].cpu() >= self.mask_weight).squeeze().numpy()
         boxes = output["boxes"].cpu().detach().numpy()
+        scores = output["scores"].cpu().detach().numpy()
 
         img = cv2.imread(path)
         original = img
@@ -454,12 +391,12 @@ class Pedestrian_Segmentation:
 
             count += 1
 
-            # if count > 0:
-            #     break
+            if count > 8:
+                break
 
         # cv2.imshow("original", original)
         # cv2.imshow("masked", img)
-        cv2.imwrite('./test.png', img)
+        cv2.imwrite(f'./{name}', img)
 
         # cv2.waitKey(0)
 
@@ -476,7 +413,8 @@ else:
     index = 0
     root = f"{model.root}/Test"
     paths = sorted(os.listdir(f"{model.root}/Test"))
-    path = os.path.join(root, paths[index])
-
-    model.detect(path)
+    for _path in paths:
+        path = os.path.join(root, _path)
+        # model.eval()
+        model.detect(path, _path)
 # #
