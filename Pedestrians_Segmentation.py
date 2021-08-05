@@ -48,7 +48,8 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
     in_features_mask = mask_RCNN.roi_heads.mask_predictor.conv5_mask.in_channels
 
     # same num of conv5_mask output
-    hidden_layer = 1 # the lower the better at this point
+    # the lower the more discrete the mask - at 1 the bounding box is the mask
+    hidden_layer = 256
 
     # num_classes = 0 (background) + 1 (person) === 2
     fastRCNN_TransferLayer = FastRCNNPredictor(in_channels=in_features_classes_fc, num_classes=2)
@@ -62,21 +63,24 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
     return mask_RCNN
 
 
+train = True  # used to switch script from train to eval
+
+
 class Pedestrian_Segmentation:
     def __init__(self):
 
-        self.device = 'cpu'
+        self.device = 'cuda'
         self.ui = True
 
         # Hyperparameters
         # can be test/PennFundanPed/Kaggle
-        self.root = 'Kaggle'
+        self.root = 'test2'
         self.transform = transforms.Compose([transforms.ToTensor()])
 
-        gamma = 0.5 # the amount the learning rate reduces each step
-        step_size = 64
+        gamma = 0.5  # the amount the learning rate reduces each step
+        step_size = 16
         self.batch_size = 1
-        self.learning_rate = 0.0005
+        self.learning_rate = 0.05
         self.epochs = 2 * step_size  # make it a multiple of three for the step size
 
         self.split_dataset_factor = 1.0
@@ -87,7 +91,7 @@ class Pedestrian_Segmentation:
                                                                                 self.root, self.split_dataset_factor)
 
         # model
-        self.mask_RCNN = mask_rcnn_transfer_learning(is_finetune=False)
+        self.mask_RCNN = mask_rcnn_transfer_learning(is_finetune=True)
         device = torch.device(self.device)
         self.mask_RCNN.to(device)
 
@@ -302,7 +306,7 @@ class Pedestrian_Segmentation:
         L_objectness = loss["loss_objectness"]
         L_rpn = loss["loss_rpn_box_reg"]
         print(
-            f'loss classifier {L_cls} loss box {L_box} loss mask {L_mask} loss objecvt {L_objectness} loss rpn {L_rpn}')
+            f'loss classifier {L_cls} loss box {L_box} loss mask {L_mask} loss object {L_objectness} loss rpn {L_rpn}')
         L = L_cls + L_box + L_mask + L_objectness + L_rpn
         L.backward()
         return L
@@ -461,8 +465,6 @@ class Pedestrian_Segmentation:
 
 
 model = Pedestrian_Segmentation()
-
-train = False
 
 if train:
     images = []
