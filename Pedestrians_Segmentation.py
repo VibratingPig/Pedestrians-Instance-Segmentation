@@ -13,6 +13,7 @@ from PIL import Image, ImageTk
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 import matplotlib.pyplot as plt
+from typing import Dict
 
 from helpers import get_dataset_loaders, get_coloured_mask, intersection_over_union
 
@@ -74,41 +75,39 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
 
 
 config = {
-    'train': False,
+    'train': True,
     'device': 'cuda',
-    'step_size': 128,
+    'step_size': 1,
     'number_of_steps': 1,
-    'mask_eval_boxes': 1e6,
-    'max_count_to_train': 0, # zero indexed
+    'max_count_to_train': 0,  # zero indexed
     'gamma': 0.1,
     'learning_rate': 0.0005,
-    'dataset': 'Kaggle'
+    'dataset': 'Kaggle',
+    'gradient_ui': 'True'
 }
 
 
-class Pedestrian_Segmentation:
-    def __init__(self, config):
+class PedestrianSegmentation:
 
-        self.device = config['device']
-        self.ui = True
+    def __init__(self, system_config: Dict[str, object]):
 
-        # Hyperparameters
-        # can be test/PennFundanPed/Kaggle
-        self.root = config['dataset']
+        self.device = system_config['device']
+        self.ui = system_config['gradient_ui']
+
+        self.root = system_config['dataset']
         self.transform = transforms.Compose([transforms.ToTensor()])
 
         # number of boxes to report when evaluating - too many looks hokey
-        self.max_eval_boxes = config['mask_eval_boxes']
-        self.max_count_to_train = config['max_count_to_train']  # high number means no breaking
+        self.max_count_to_train = system_config['max_count_to_train']  # high number means no breaking
         # filter for incoming masks on detection - the value must be greater than this
         self.mask_weight = 0.5
-        # threshould for bounding box evaluation
+        # threshold for bounding box evaluation
         self.IoU_threshold = 0.25
-        gamma = config['gamma']  # the amount the learning rate reduces each step
-        step_size = config['step_size']
+        gamma = system_config['gamma']  # the amount the learning rate reduces each step
+        step_size = system_config['step_size']
         self.batch_size = 1
-        self.learning_rate = config['learning_rate']
-        self.epochs = config['number_of_steps'] * step_size  # make it a multiple of three for the step size
+        self.learning_rate = system_config['learning_rate']
+        self.epochs = system_config['number_of_steps'] * step_size  # make it a multiple of three for the step size
 
         self.split_dataset_factor = 1.0
 
@@ -142,6 +141,27 @@ class Pedestrian_Segmentation:
         self.feature_value = 0
 
         self.losses = []
+
+    def build_error_ui(self):
+        # build ui
+        self.frame1 = ttk.Frame(tk.Tk())
+        self.frame4 = ttk.Frame(self.frame1)
+        self.frame4.configure(height='200', width='200')
+        self.frame4.grid(column='0', row='0')
+        self.frame5 = ttk.Frame(self.frame1)
+        self.frame5.configure(height='200', width='200')
+        self.frame5.grid(column='1', row='0')
+        self.frame7 = ttk.Frame(self.frame1)
+        self.frame7.configure(height='200', width='200')
+        self.frame7.grid(column='0', row='1')
+        self.frame8 = ttk.Frame(self.frame1)
+        self.frame8.configure(height='200', width='200')
+        self.frame8.grid(column='1', row='1')
+        self.frame1.configure(height='200', width='200')
+        self.frame1.grid(column='2', row='2')
+
+        # Main widget
+        self.mainwindow = self.frame1
 
     def build_ui(self):
         self.frame1 = ttk.Frame(tk.Tk())
@@ -340,6 +360,9 @@ class Pedestrian_Segmentation:
 
     def train(self, images):
 
+        self.build_error_ui()
+        self.mainwindow.mainloop()
+
         # set to training mode
         # PG this sets a flag on all the modules in PyTorch to train
         # as the documentation states it only affects some modules such as batchnorm
@@ -363,6 +386,7 @@ class Pedestrian_Segmentation:
         if self.ui:
             self.build_ui()
             self.mainwindow.mainloop()
+
 
     def save(self):
         torch.save(self.mask_RCNN.state_dict(), self.weights_path)
@@ -401,7 +425,6 @@ class Pedestrian_Segmentation:
         img = cv2.imread(path)
         original = img
 
-        count = 0
         for i, mask in enumerate(masks):
             # for i in range(5):
             mask = get_coloured_mask(mask)
@@ -409,13 +432,8 @@ class Pedestrian_Segmentation:
 
             img = cv2.addWeighted(img, 1, mask, 0.5, 0)
             cv2.rectangle(img, (round(boxes[i][0]), round(boxes[i][1])), (round(boxes[i][2]), round(boxes[i][3])),
-                          (0, 200, 0))
+                          color=(0, 0, 255), thickness=3)
             # cv2.rectangle(img, (boxes[i][0], boxes[i][1]), (boxes[i][2],boxes[i][3]))
-
-            count += 1
-
-            if count > self.max_eval_boxes:
-                break
 
         # cv2.imshow("original", original)
         # cv2.imshow("masked", img)
@@ -424,7 +442,7 @@ class Pedestrian_Segmentation:
         # cv2.waitKey(0)
 
 
-model = Pedestrian_Segmentation(config)
+model = PedestrianSegmentation(config)
 
 if config['train']:
     images = []
