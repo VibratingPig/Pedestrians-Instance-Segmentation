@@ -96,7 +96,7 @@ class PennnFudanDataset(Dataset):
                 boxes.append([xmin, ymin, xmax, ymax])
                 area.append((ymax - ymin) * (xmax - xmin))
 
-        if not self.use_masks:
+        elif not self.use_masks:
             df = pd.read_csv('./Kaggle/PedMasks/train_image_level.csv')
 
             image_id = image_name.split('.')[0] + "_image"
@@ -130,13 +130,14 @@ class PennnFudanDataset(Dataset):
                     if not self.accept_non_covid:
                         return None
 
-            if is_covid:
-                IDs = np.unique(np.array(oo))
-                IDs = IDs[1:]
-                IDs = IDs.reshape(-1, 1, 1)
-                masks = np.array(oo) == IDs
-
         if is_covid:
+            IDs = np.unique(np.array(oo))
+            IDs = IDs[1:]
+            IDs = IDs.reshape(-1, 1, 1)
+            masks = np.array(oo) == IDs
+
+        if is_covid or self.use_masks:
+
             # convert 2D List to 2D Tensor (this is not numpy array)
             boxes = torch.as_tensor(boxes, dtype=torch.float32)
             area = torch.as_tensor(area, dtype=torch.float32)

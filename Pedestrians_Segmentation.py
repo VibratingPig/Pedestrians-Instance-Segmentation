@@ -77,13 +77,13 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
 config = {
     'train': True,
     'device': 'cuda',
-    'step_size': 2,
-    'number_of_steps': 16,
+    'step_size': 256,
+    'number_of_steps': 1,
     'max_count_to_train': 0,  # zero indexed
-    'gamma': 0.1,
+    'gamma': 0.5,
     'learning_rate': 0.0005,
-    'dataset': 'Kaggle',
-    'gradient_ui': False,
+    'dataset': 'test',
+    'gradient_ui': True,
     'number_of_classes': 2
 }
 
@@ -135,7 +135,7 @@ class PedestrianSegmentation:
         self.lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer=self.optimizer, step_size=step_size, gamma=gamma)
 
         # path to save / load weights
-        self.weights_path = "weights_27_classes_128_runs_kaggle.pth"
+        self.weights_path = "weights.pth"
 
         self.hook_cls = ForwardHookCapture()
         self.threshold = 0
@@ -360,6 +360,13 @@ class PedestrianSegmentation:
             self.build_ui()
             self.mainwindow.mainloop()
 
+        root = f"{self.root}/Test"
+        paths = sorted(os.listdir(f"{self.root}/Test"))
+        for _path in paths:
+            path = os.path.join(root, _path)
+            # model.eval()
+            self.detect(path, _path)
+
     def save(self):
         torch.save(self.mask_RCNN.state_dict(), self.weights_path)
 
@@ -372,10 +379,10 @@ class PedestrianSegmentation:
         run the forward inference using the path and the name
         :type path: object
         """
-        transform = torchvision.transforms.ToTensor()
+        # transform = torchvision.transforms.ToTensor()
 
         image = Image.open(path)
-        image = transform(image)
+        image = self.transform(image)
 
         device = torch.device(self.device)
         # PG We want the gradient information.
@@ -393,7 +400,8 @@ class PedestrianSegmentation:
         masks = (output["masks"].cpu() >= self.mask_weight).squeeze().numpy()
         boxes = output["boxes"].cpu().detach().numpy()
         scores = output["scores"].cpu().detach().numpy()
-
+        print(scores)
+        print(boxes)
         img = cv2.imread(path)
         original = img
 
