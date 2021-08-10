@@ -56,7 +56,7 @@ class PennnFudanDataset(Dataset):
             mask = Image.open(self.masksPaths[index])
 
         # PG Flag for not processing boxes
-        is_not_covid = False
+        is_covid = False
 
         try:
             image = image.convert("RGB")
@@ -120,29 +120,28 @@ class PennnFudanDataset(Dataset):
                         x_width = int(boundary_boxes['width'])
                         y_height = int(boundary_boxes['height'])
 
-                        # print(f'For {image_name} setting {x},{y} to {x+x_width}, {y+y_height} for {x_width} and {y_height}')
+                        print(f'For {image_name} setting {x},{y} to {x+x_width}, {y+y_height} for {x_width} and {y_height}')
                         boxes.append([x, y, x + x_width, y + y_height])
                         area.append(x_width * y_height)
                         oo[i, x:(x + x_width), y:(y + y_height)] = i + 1
+                        is_covid = True
                 except:
-                    is_not_covid = True
                     print(f'whatever reason cannot parse {box} for {image_id}')
                     if not self.accept_non_covid:
                         return None
 
-            if not is_not_covid:
+            if is_covid:
                 IDs = np.unique(np.array(oo))
                 IDs = IDs[1:]
                 IDs = IDs.reshape(-1, 1, 1)
                 masks = np.array(oo) == IDs
 
-        if not is_not_covid:
+        if is_covid:
             # convert 2D List to 2D Tensor (this is not numpy array)
             boxes = torch.as_tensor(boxes, dtype=torch.float32)
             area = torch.as_tensor(area, dtype=torch.float32)
 
             # labels for each box
-            # there is only 1 class (pedestrian) so it will always be 1 (if multiple classes, so we will assign 1,2,3 ... etc to each one)
             labels = torch.ones((N,), dtype=torch.int64)
 
             # image_id requirement for model, index is unique for every image
@@ -159,7 +158,7 @@ class PennnFudanDataset(Dataset):
             # print("mask size=", mask.size)
         else:
             # PG make the entire image a mask
-            oo = np.zeros([1, image.width, image.height])
+            oo = np.zeros([1, 1, 1])
             masks = np.array(oo) == 0
             # there is no covid here and we need the network to train for that...
             boxes.append([0, 0, 10, 10])
@@ -167,7 +166,7 @@ class PennnFudanDataset(Dataset):
             masks = torch.as_tensor(masks, dtype=torch.uint8)
             boxes = torch.as_tensor(boxes, dtype=torch.float32)
             area = torch.as_tensor(area, dtype=torch.float32)
-            labels = torch.zeros((1,), dtype=torch.int64)
+            labels = torch.ones((1,), dtype=torch.int64) * 2
             iscrowd = torch.zeros((1,), dtype=torch.uint8)
             image_id = torch.tensor([index], dtype=torch.int64)
 

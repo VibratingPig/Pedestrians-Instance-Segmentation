@@ -1,9 +1,10 @@
 import os
-import time
 import tkinter as tk
 import tkinter.ttk as ttk
+from typing import Dict
 
 import cv2
+import matplotlib.pyplot as plt
 import torch
 import torch.utils.data
 import torchvision
@@ -12,10 +13,8 @@ from PIL import Image, ImageTk
 # last layer of each architecture for transfer learning
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
-import matplotlib.pyplot as plt
-from typing import Dict
 
-from helpers import get_dataset_loaders, get_coloured_mask, intersection_over_union
+from helpers import get_dataset_loaders, get_coloured_mask
 
 
 class ForwardHookCapture:
@@ -33,7 +32,7 @@ class ForwardHookCapture:
         self.inputs = input
 
 
-def mask_rcnn_transfer_learning(is_finetune: bool):
+def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
     # PG do not use the coco data set but train from the ground up
     # set pretrained to False
     mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True,
@@ -48,10 +47,10 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
                                                                    box_fg_iou_thresh=0.6
                                                                    )
 
-    # just train the modified layers
-    if not is_finetune:
-        for param in mask_RCNN.parameters():
-            param.requires_grad = False
+    # # just train the modified layers
+    # if not is_finetune:
+    #     for param in mask_RCNN.parameters():
+    #         param.requires_grad = False
 
     # print(mask_RCNN)
 
@@ -62,9 +61,10 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
     # the lower the more discrete the mask - at 1 the bounding box is the mask
     hidden_layer = 256
 
-    # num_classes = 0 (background) + 1 (person) === 2
-    fastRCNN_TransferLayer = FastRCNNPredictor(in_channels=in_features_classes_fc, num_classes=2)
-    maskRCNN_TransferLayer = MaskRCNNPredictor(in_channels=in_features_mask, dim_reduced=hidden_layer, num_classes=2)
+    # num_classes = 0 (background) + 1 (covid) + 1 (non covid) === 2
+    fastRCNN_TransferLayer = FastRCNNPredictor(in_channels=in_features_classes_fc, num_classes=num_classes)
+    maskRCNN_TransferLayer = MaskRCNNPredictor(in_channels=in_features_mask, dim_reduced=hidden_layer,
+                                               num_classes=num_classes)
 
     mask_RCNN.roi_heads.box_predictor = fastRCNN_TransferLayer
     mask_RCNN.roi_heads.mask_predictor = maskRCNN_TransferLayer
@@ -77,13 +77,14 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
 config = {
     'train': True,
     'device': 'cuda',
-    'step_size': 1,
-    'number_of_steps': 1,
+    'step_size': 2,
+    'number_of_steps': 16,
     'max_count_to_train': 0,  # zero indexed
     'gamma': 0.1,
     'learning_rate': 0.0005,
     'dataset': 'Kaggle',
-    'gradient_ui': 'True'
+    'gradient_ui': False,
+    'number_of_classes': 2
 }
 
 
@@ -117,7 +118,7 @@ class PedestrianSegmentation:
                                                                                 self.root, self.split_dataset_factor)
 
         # model
-        self.mask_RCNN = mask_rcnn_transfer_learning(is_finetune=True)
+        self.mask_RCNN = mask_rcnn_transfer_learning(is_finetune=True, num_classes=system_config['number_of_classes'])
         device = torch.device(self.device)
         self.mask_RCNN.to(device)
 
@@ -141,27 +142,6 @@ class PedestrianSegmentation:
         self.feature_value = 0
 
         self.losses = []
-
-    def build_error_ui(self):
-        # build ui
-        self.frame1 = ttk.Frame(tk.Tk())
-        self.frame4 = ttk.Frame(self.frame1)
-        self.frame4.configure(height='200', width='200')
-        self.frame4.grid(column='0', row='0')
-        self.frame5 = ttk.Frame(self.frame1)
-        self.frame5.configure(height='200', width='200')
-        self.frame5.grid(column='1', row='0')
-        self.frame7 = ttk.Frame(self.frame1)
-        self.frame7.configure(height='200', width='200')
-        self.frame7.grid(column='0', row='1')
-        self.frame8 = ttk.Frame(self.frame1)
-        self.frame8.configure(height='200', width='200')
-        self.frame8.grid(column='1', row='1')
-        self.frame1.configure(height='200', width='200')
-        self.frame1.grid(column='2', row='2')
-
-        # Main widget
-        self.mainwindow = self.frame1
 
     def build_ui(self):
         self.frame1 = ttk.Frame(tk.Tk())
@@ -355,28 +335,21 @@ class PedestrianSegmentation:
         print(
             f'loss classifier {L_cls} loss box {L_box} loss mask {L_mask} loss object {L_objectness} loss rpn {L_rpn}')
         L = L_cls + L_box + L_mask + L_objectness + L_rpn
+        # self.losses.append(L_objectness.cpu().detach().numpy().__float__())
         L.backward()
         return L
 
     def train(self, images):
-
-        self.build_error_ui()
-        self.mainwindow.mainloop()
 
         # set to training mode
         # PG this sets a flag on all the modules in PyTorch to train
         # as the documentation states it only affects some modules such as batchnorm
         self.mask_RCNN.train()
 
-        t1 = time.time()
-
         for epoch in range(self.epochs):
             print('############################# ', epoch + 1, "/", self.epochs)
             self.train_one_epoch(images)
             self.lr_scheduler.step()
-
-        # t2 = time.time() - t1
-        # print("time = ", t2)
 
         self.mask_RCNN.backbone.body.conv1.register_forward_hook(self.hook_cls.hook)
         self.outputs = model.mask_RCNN(self.images, self.targets)
@@ -386,7 +359,6 @@ class PedestrianSegmentation:
         if self.ui:
             self.build_ui()
             self.mainwindow.mainloop()
-
 
     def save(self):
         torch.save(self.mask_RCNN.state_dict(), self.weights_path)
