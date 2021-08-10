@@ -18,8 +18,15 @@ class MaskCreator():
 
 
 class PennnFudanDataset(Dataset):
-    def __init__(self, root, transform=None, use_masks=True):
+    def __init__(self, root, transform=None, use_masks=True, accept_non_covid=False):
+        """
 
+        :param root:
+        :param transform:
+        :param use_masks:
+        :param accept_non_covid: whether to include non covid results in the data set
+        """
+        self.accept_non_covid = accept_non_covid
         self.transform = transform
         self.root = root
         if self.root == 'Kaggle':
@@ -42,6 +49,7 @@ class PennnFudanDataset(Dataset):
     def __getitem__(self, index):
 
         image_name = self.imagesPaths[index].split('/')[2].split(".")[0]
+        print(f'Processing {image_name}')
         # load image & mask
         image = Image.open(self.imagesPaths[index])
         if self.use_masks:
@@ -50,7 +58,10 @@ class PennnFudanDataset(Dataset):
         # PG Flag for not processing boxes
         is_not_covid = False
 
-        # image = image.convert("RGB")
+        try:
+            image = image.convert("RGB")
+        except:
+            return None
 
         # We get the boxes from the masks instead of reading it from a CSV file
 
@@ -116,7 +127,8 @@ class PennnFudanDataset(Dataset):
                 except:
                     is_not_covid = True
                     print(f'whatever reason cannot parse {box} for {image_id}')
-                    # return None
+                    if not self.accept_non_covid:
+                        return None
 
             if not is_not_covid:
                 IDs = np.unique(np.array(oo))
@@ -150,7 +162,7 @@ class PennnFudanDataset(Dataset):
             oo = np.zeros([1, image.width, image.height])
             masks = np.array(oo) == 0
             # there is no covid here and we need the network to train for that...
-            boxes.append([0,0,10,10])
+            boxes.append([0, 0, 10, 10])
             area.append(10 * 10)
             masks = torch.as_tensor(masks, dtype=torch.uint8)
             boxes = torch.as_tensor(boxes, dtype=torch.float32)

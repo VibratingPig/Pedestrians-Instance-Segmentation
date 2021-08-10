@@ -35,7 +35,17 @@ class ForwardHookCapture:
 def mask_rcnn_transfer_learning(is_finetune: bool):
     # PG do not use the coco data set but train from the ground up
     # set pretrained to False
-    mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True)
+    mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True,
+                                                                   rpn_pre_nms_top_n_train=2,
+                                                                   rpn_post_nms_top_n_train=2,
+                                                                   rpn_nms_thresh=0.9,
+                                                                   rpn_fg_iou_thresh=0.9,
+                                                                   rpn_score_thresh=0.2,
+                                                                   box_score_thresh=0.1,
+                                                                   box_nms_thresh=0.6,
+                                                                   box_detections_per_img=2,
+                                                                   box_fg_iou_thresh=0.6
+                                                                   )
 
     # just train the modified layers
     if not is_finetune:
@@ -63,29 +73,42 @@ def mask_rcnn_transfer_learning(is_finetune: bool):
     return mask_RCNN
 
 
-train = False  # used to switch script from train to eval
+config = {
+    'train': False,
+    'device': 'cuda',
+    'step_size': 128,
+    'number_of_steps': 1,
+    'mask_eval_boxes': 1e6,
+    'max_count_to_train': 0, # zero indexed
+    'gamma': 0.1,
+    'learning_rate': 0.0005,
+    'dataset': 'Kaggle'
+}
+
 
 class Pedestrian_Segmentation:
-    def __init__(self):
+    def __init__(self, config):
 
-        self.device = 'cpu'
+        self.device = config['device']
         self.ui = True
 
         # Hyperparameters
         # can be test/PennFundanPed/Kaggle
-        self.root = 'Kaggle'
+        self.root = config['dataset']
         self.transform = transforms.Compose([transforms.ToTensor()])
 
-        self.max_count_to_train = 1e6 # high number means no breaking
+        # number of boxes to report when evaluating - too many looks hokey
+        self.max_eval_boxes = config['mask_eval_boxes']
+        self.max_count_to_train = config['max_count_to_train']  # high number means no breaking
         # filter for incoming masks on detection - the value must be greater than this
         self.mask_weight = 0.5
         # threshould for bounding box evaluation
         self.IoU_threshold = 0.25
-        gamma = 0.5  # the amount the learning rate reduces each step
-        step_size = 128
+        gamma = config['gamma']  # the amount the learning rate reduces each step
+        step_size = config['step_size']
         self.batch_size = 1
-        self.learning_rate = 0.005
-        self.epochs = 2 * step_size  # make it a multiple of three for the step size
+        self.learning_rate = config['learning_rate']
+        self.epochs = config['number_of_steps'] * step_size  # make it a multiple of three for the step size
 
         self.split_dataset_factor = 1.0
 
@@ -112,7 +135,7 @@ class Pedestrian_Segmentation:
         self.lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer=self.optimizer, step_size=step_size, gamma=gamma)
 
         # path to save / load weights
-        self.weights_path = "./weights.pth"
+        self.weights_path = "weights_27_classes_128_runs_kaggle.pth"
 
         self.hook_cls = ForwardHookCapture()
         self.threshold = 0
@@ -271,7 +294,7 @@ class Pedestrian_Segmentation:
             # boxes look like 2x4 tensor - so one for each image and 4 coordinates
             # masks appear to be boolean and sized to the smaller of the two images 341 x 414.
             # squirt them down to the card taken from the torchvision reference impl.
-            if images:  # could be none
+            if images:  # could be none due to being 0
                 images = list(image.to(device) for image in images)
                 # [{print(f'{k} {v}') for k, v in t.items()} for t in targets if t is not None]
 
@@ -309,8 +332,8 @@ class Pedestrian_Segmentation:
         L_mask = loss["loss_mask"]
         L_objectness = loss["loss_objectness"]
         L_rpn = loss["loss_rpn_box_reg"]
-        # print(
-        #     f'loss classifier {L_cls} loss box {L_box} loss mask {L_mask} loss object {L_objectness} loss rpn {L_rpn}')
+        print(
+            f'loss classifier {L_cls} loss box {L_box} loss mask {L_mask} loss object {L_objectness} loss rpn {L_rpn}')
         L = L_cls + L_box + L_mask + L_objectness + L_rpn
         L.backward()
         return L
@@ -348,7 +371,7 @@ class Pedestrian_Segmentation:
         weights = torch.load(self.weights_path)
         self.mask_RCNN.load_state_dict(weights)
 
-    def detect(self, path:str, name: str):
+    def detect(self, path: str, name: str):
         """
         run the forward inference using the path and the name
         :type path: object
@@ -391,7 +414,7 @@ class Pedestrian_Segmentation:
 
             count += 1
 
-            if count > 8:
+            if count > self.max_eval_boxes:
                 break
 
         # cv2.imshow("original", original)
@@ -401,9 +424,9 @@ class Pedestrian_Segmentation:
         # cv2.waitKey(0)
 
 
-model = Pedestrian_Segmentation()
+model = Pedestrian_Segmentation(config)
 
-if train:
+if config['train']:
     images = []
     model.train(images)
     model.save()
