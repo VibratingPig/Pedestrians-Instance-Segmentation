@@ -77,12 +77,12 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
 config = {
     'train': True,
     'device': 'cuda',
-    'step_size': 256,
-    'number_of_steps': 1,
+    'step_size': 20,
+    'number_of_steps': 3,
     'max_count_to_train': 0,  # zero indexed
     'gamma': 0.5,
-    'learning_rate': 0.0005,
-    'dataset': 'test',
+    'learning_rate': 0.005,
+    'dataset': 'Kaggle',
     'gradient_ui': True,
     'number_of_classes': 2
 }
