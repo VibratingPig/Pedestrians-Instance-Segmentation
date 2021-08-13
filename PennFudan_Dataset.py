@@ -125,7 +125,7 @@ class PennnFudanDataset(Dataset):
                         area.append(x_width * y_height)
                         oo[i, x:(x + x_width), y:(y + y_height)] = i + 1
                         is_covid = True
-                        break
+                        # break
                 except:
                     print(f'whatever reason cannot parse {box} for {image_id}')
                     if not self.accept_non_covid:

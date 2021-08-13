@@ -61,7 +61,7 @@ def my_collate(batch):
 def get_dataset_loaders(transform, batch_size, test_batch_size, root, split_perecentage):
 
     # Load Dataset
-    dataset = PennnFudanDataset(root, transform, True)
+    dataset = PennnFudanDataset(root, transform, False)
 
     # Split dataset into train and test
     n = len(dataset)
