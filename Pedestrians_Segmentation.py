@@ -10,6 +10,7 @@ import torchvision
 import torchvision.transforms as transforms
 from PIL import Image, ImageTk
 # last layer of each architecture for transfer learning
+from torch import Tensor
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 from helpers import get_dataset_loaders
@@ -27,6 +28,10 @@ class ForwardHookCapture:
 
         # print('this is the second run forward - we need to understand how to backprop the relevance')
         self.output = output
+        try:
+            Tensor.retain_grad(self.output[0].tensors[0])
+        except:
+            Tensor.retain_grad(self.output)
         self.inputs = input
 
 
@@ -40,7 +45,7 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
     # image_mean = [0, 0, 0]
     # image_std = [1, 1, 1]
 
-    mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True,
+    mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=False,
                                                                    # rpn_pre_nms_top_n_train=2,
                                                                    # rpn_post_nms_top_n_train=2,
                                                                    # rpn_nms_thresh=0.9,
@@ -49,7 +54,7 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
                                                                    # rpn_score_thresh=0.5,
                                                                    # after 256 epochs we can reach
                                                                    # 0.50 threshold
-                                                                   box_score_thresh=0.14, # during inference only
+                                                                   box_score_thresh=0.1, # during inference only
                                                                    # box_nms_thresh=0.6,
                                                                    # box_detections_per_img=2,
                                                                    # box_fg_iou_thresh=0.6,
@@ -85,15 +90,15 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
 
 
 config = {
-    'train': False,
-    'device': 'cpu',
-    'step_size': 256,
-    'number_of_steps': 2,
-    'max_count_to_train': 1e6,  # zero indexed
+    'train': True,
+    'device': 'cuda',
+    'step_size': 128,
+    'number_of_steps': 1,
+    'max_count_to_train': 0,  # zero indexed
     'gamma': 0.1,
     'learning_rate': 0.005,
-    'dataset': 'Kaggle',
-    'gradient_ui': False,
+    'dataset': 'test2',
+    'gradient_ui': True,
     'number_of_classes': 2
 }
 
@@ -120,7 +125,7 @@ class PedestrianSegmentation:
         self.learning_rate = system_config['learning_rate']
         self.epochs = system_config['number_of_steps'] * step_size  # make it a multiple of three for the step size
 
-        self.split_dataset_factor = 2/3
+        self.split_dataset_factor = 1
 
         # dataset
         # test_batch_size = 1 for looping over single sample
@@ -199,7 +204,7 @@ class PedestrianSegmentation:
 
     def scale_changed(self, scale_value):
         self.threshold = round(float(scale_value))
-        print(self.threshold)
+        # print(self.threshold)
         image = self.plot_feature(self.feature_value, threshold=self.threshold, recalc=False)
         photo_image = ImageTk.PhotoImage(image=Image.fromarray(image.numpy().astype('uint8'),
                                                                mode='RGB'))
@@ -209,70 +214,20 @@ class PedestrianSegmentation:
         self.frame1.pack(side='top')
 
     def plot_feature(self, index, threshold=125, positive_value=255, negative_value=0, recalc=True):
-        #
-        device = torch.device(self.device)
         if recalc:
-            L = self.run_backwards()
-            self.image = self.outputs[1].tensors[0].cpu().detach()
+            self.run_backwards()
 
-        # print(f'Setting index to {index} and {threshold}')
-        # self.mask_RCNN.backbone.body.conv1.register_forward_hook(self.hook_cls.hook)
-        # self.outputs = self.mask_RCNN(self.images, self.targets)
-        my_zeros = torch.zeros(1, 64, 400, 432)
-        # just want to set one of the 64 dimensional output to 1's and see what the
-        # output looks like
-        my_ones = torch.ones(400, 432)
-        my_zeros[0, index, :, :] = my_ones
-        # this is the output layer at the first convolutional layer
-        # need to supply inputs as the gradient is accumulated otherwise
-        my_zeros = my_zeros.to(device)
-        # TODO This LEAKS MEMORY!!!!!!
-        # under cuda just rerun
-        # run this for a single value feature selection but this is !not! the output from
-        # the first layer - its important also to consider what the features are
-        # from the first layer for this image
-        # self.hook_cls.output.backward(my_zeros, inputs = self.hook_cls.inputs)
-
-        # now move the zeros back to the cpu to free up space.
-        # my_zeros = my_zeros.cpu()
-        # we are interested in the gradient value - this isn't the gradient function
-        # detach to remove it from the graph and play with it
         if recalc or not hasattr(self, "gradient"):
-            self.gradient = self.outputs[1].tensors.grad.cpu().detach()[0]  # there will only ever be on grad
-        gradient_image = self.gradient.permute(1, 2, 0)
-        # sum over third dimension
-        # gradient_image = gradient_image.sum(2)
+            try:
+                gradient = self.hook_cls.output.grad.cpu().detach()[0]  # there will only ever be on grad
+            except:
+                try:
+                    gradient = self.hook_cls.output.grad  # there will only ever be on grad
+                except:
+                    gradient = self.hook_cls.inputs[0].grad
 
-        # OMG - this is a pain in the a&$e
-        # self.optimizer.step()
-        # self.optimizer.zero_grad()
-        # zeroing out the gradient appears to be consistent
-        self.outputs[1].tensors.grad = self.outputs[1].tensors.grad * 0
-        # print(gradient[0,:,:])
-        # each colour channel has its own gradients
-
-        # rebase to range 0 - 255
-        # for i in range(3):
-        #     max = gradient_image[:, :, i].max()
-        #     min = gradient_image[:, :, i].min()
-        #     gradient_image[:, :, i] = (gradient_image[:, :, i] - min) / (max - min) * 255
-
-        # apply threshold to the image after we have convolved it and normalized it
-
-        tensor_image = self.image.permute(1, 2, 0)
-        # tensor_image = tensor_image.sum(2)
-
-        # here we perform sensitivity analysis to find out the changes in the image
-        # this is not the same as mutliplying by the gradient - we are moving in the direction of steepest descent
-        # convolved_image = tensor_image - gradient_image
-
-        # Deep taylor expansion is * not +
-        convolved_image = gradient_image * tensor_image
-        # convolved_image = gradient_image
-        # filter all colors below a certain level - the level is the strength of the activation hence feature
-        # strength
-
-        # renormalize colours as they may be beyond the 0 - 255 range
+        gradient_image = gradient.permute(1, 2, 0)
+        convolved_image = self.hook_cls.output[0,:,:,:].cpu().permute(1,2,0) * gradient_image #* self.hook_cls.inputs # * tensor_image
         for i in range(3):
             max = convolved_image[:, :, i].max()
             min = convolved_image[:, :, i].min()
@@ -328,22 +283,22 @@ class PedestrianSegmentation:
                     # print('batch greater than 2 - breaking out of loop')
                     break
 
-        print('Testing######')
-        for i, (images, targets) in enumerate(self.test_loader):
-            if images:  # could be none due to being 0
-                images = list(image.to(device) for image in images)
-                targets = [{k: v.to(device) for k, v in t.items()} for t in targets if t is not None]
-                self.images = images
-                self.targets = targets
-
-                # model in training mode accepts both input and output and return the loss of all types
-                # PG See torchvision.models.detection.transform.GeneralizedRCNNTransform for the transformation applied
-                # it does resize, mean shifts and std deviations shift the images prior to use.
-                L = self.run_backwards()
-
-                # we don't step backwards here as we don't want to include the test/validation data
-                print("Loss = ", L.item(), " batch = ", i, "/", batches_per_epoch)
-                self.test_losses.append(L.item())
+        # print('Testing######')
+        # for i, (images, targets) in enumerate(self.test_loader):
+        #     if images:  # could be none due to being 0
+        #         images = list(image.to(device) for image in images)
+        #         targets = [{k: v.to(device) for k, v in t.items()} for t in targets if t is not None]
+        #         self.images = images
+        #         self.targets = targets
+        #
+        #         # model in training mode accepts both input and output and return the loss of all types
+        #         # PG See torchvision.models.detection.transform.GeneralizedRCNNTransform for the transformation applied
+        #         # it does resize, mean shifts and std deviations shift the images prior to use.
+        #         L = self.run_backwards()
+        #
+        #         # we don't step backwards here as we don't want to include the test/validation data
+        #         print("Loss = ", L.item(), " batch = ", i, "/", batches_per_epoch)
+        #         self.test_losses.append(L.item())
 
         # move everything to CPU
         # device = torch.device('cpu')
@@ -380,15 +335,17 @@ class PedestrianSegmentation:
         # as the documentation states it only affects some modules such as batchnorm
         self.mask_RCNN.train()
 
-        self.mask_RCNN.backbone.body.conv1.register_forward_hook(self.hook_cls.hook)
+        selected_tensor = self.mask_RCNN.backbone.body.conv1
+        # Tensor.retain_grad(selected_tensor)
+        selected_tensor.register_forward_hook(self.hook_cls.hook)
 
-        for epoch in range(self.epochs):
+        for epoch in range(0,self.epochs):
             print('############################# ', epoch + 1, "/", self.epochs)
             self.train_one_epoch(images)
             self.lr_scheduler.step()
-            # image_array = self.plot_feature(0, threshold=119)
-            # image = Image.fromarray(image_array.numpy().astype('uint8'), mode='RGB')
-            # image.save(f'./images/image{epoch}.png')
+            image_array = self.plot_feature(0, threshold=119)
+            image = Image.fromarray(image_array.numpy().astype('uint8'), mode='RGB')
+            image.save(f'./images/image{epoch}.png')
 
 
         self.outputs = model.mask_RCNN(self.images, self.targets)
@@ -468,9 +425,13 @@ class PedestrianSegmentation:
 
         # cv2.waitKey(0)
 
+    def foo(self):
+        scriptmodule = torch.jit.script(self.mask_RCNN)
+        scriptmodule.cpu()
+        print(self.mask_RCNN)
 
 model = PedestrianSegmentation(config)
-
+print(model.mask_RCNN)
 if config['train']:
     images = []
     model.train(images)
@@ -485,4 +446,4 @@ else:
         path = os.path.join(root, _path)
         # model.eval()
         model.detect(path, _path)
-# #
+# # #
