@@ -24,8 +24,8 @@ for k in range(0, 512):
 
 ## Make animation
 
-plt.show()
+# plt.show()
 
-animation = animation.ArtistAnimation(fig, myimages, interval=20, blit=True, repeat_delay=1000)
+animation = animation.ArtistAnimation(fig, myimages, interval=20, blit=True)
 
-animation.save("animation.mp4", fps = 2)
+animation.save("animation.mp4", fps = 4)

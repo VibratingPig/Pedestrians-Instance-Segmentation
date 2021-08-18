@@ -9,12 +9,16 @@ import torch.utils.data
 import torchvision
 import torchvision.transforms as transforms
 from PIL import Image, ImageTk
+from matplotlib import pyplot as plt
 # last layer of each architecture for transfer learning
 from torch import Tensor
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
-from helpers import get_dataset_loaders
-from matplotlib import pyplot as plt
+
+from helpers import get_dataset_loaders, get_coloured_mask, intersection_over_union
+
+import subprocess
+subprocess.run(['rm', '/home/piero/morespace/Documents/Pedestrians-Instance-Segmentation/images/*'])
 
 class ForwardHookCapture:
 
@@ -45,16 +49,18 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
     # image_mean = [0, 0, 0]
     # image_std = [1, 1, 1]
 
-    mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=False,
+    mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True,
                                                                    # rpn_pre_nms_top_n_train=2,
                                                                    # rpn_post_nms_top_n_train=2,
                                                                    # rpn_nms_thresh=0.9,
-                                                                   # rpn_fg_iou_thresh=0.9,
-                                                                   # rpn_bg_iou_thresh=0.01,
+                                                                   # box_fg_iou_thresh=0.95,
+                                                                   rpn_bg_iou_thresh=0.5, # setting these two differently allows for inbetween labelling of -1
+                                                                   rpn_fg_iou_thresh=0.5,
                                                                    # rpn_score_thresh=0.5,
                                                                    # after 256 epochs we can reach
                                                                    # 0.50 threshold
-                                                                   box_score_thresh=0.1, # during inference only
+                                                                   box_score_thresh=0.8,  # during inference only
+                                                                   # box_batch_size_per_image=4096,
                                                                    # box_nms_thresh=0.6,
                                                                    # box_detections_per_img=2,
                                                                    # box_fg_iou_thresh=0.6,
@@ -90,15 +96,15 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
 
 
 config = {
-    'train': True,
+    'train': False,
     'device': 'cuda',
-    'step_size': 128,
+    'step_size': 256,
     'number_of_steps': 1,
     'max_count_to_train': 0,  # zero indexed
     'gamma': 0.1,
     'learning_rate': 0.005,
-    'dataset': 'test2',
-    'gradient_ui': True,
+    'dataset': 'test',
+    'gradient_ui': False,
     'number_of_classes': 2
 }
 
@@ -227,7 +233,8 @@ class PedestrianSegmentation:
                     gradient = self.hook_cls.inputs[0].grad
 
         gradient_image = gradient.permute(1, 2, 0)
-        convolved_image = self.hook_cls.output[0,:,:,:].cpu().permute(1,2,0) * gradient_image #* self.hook_cls.inputs # * tensor_image
+        convolved_image = self.hook_cls.output[0, :, :, :].cpu().permute(1, 2,
+                                                                         0) * gradient_image  # * self.hook_cls.inputs # * tensor_image
         for i in range(3):
             max = convolved_image[:, :, i].max()
             min = convolved_image[:, :, i].min()
@@ -237,15 +244,12 @@ class PedestrianSegmentation:
             # Note you can set this to 0 to see what contradictory evidence is presented
             convolved_image[:, :, i][convolved_image[:, :, i] < threshold] = 0
 
-        # convolved_image[:, :, 0] = torch.where(convolved_image[:, :, 0] > threshold, positive_value, negative_value)
-        # convolved_image[:, :, 1] = torch.where(convolved_image[:, :, 1] > threshold, positive_value, negative_value)
-        # convolved_image[:, :, 2] = torch.where(convolved_image[:, :, 2] > threshold, positive_value, negative_value)
-        # print(f'Sum of gradient is {gradient_image.sum()}')
+        first_three = convolved_image[:,:,0:3]
+        for i in range(3):
+            first_three[:,:,i] = ((first_three[:,:,i] - first_three[:,:,i].min()) / first_three[:,:,i].max()) * 255
+        first_three = first_three.int()
 
-        # plt.imshow(tensor_image.int().sum(2))
-        # plt.show()
-        # convolved_image = convolved_image.permute(1,2,0)
-        return convolved_image.int()
+        return first_three
 
     def train_one_epoch(self, images_list):
 
@@ -339,7 +343,7 @@ class PedestrianSegmentation:
         # Tensor.retain_grad(selected_tensor)
         selected_tensor.register_forward_hook(self.hook_cls.hook)
 
-        for epoch in range(0,self.epochs):
+        for epoch in range(0, self.epochs):
             print('############################# ', epoch + 1, "/", self.epochs)
             self.train_one_epoch(images)
             self.lr_scheduler.step()
@@ -347,11 +351,10 @@ class PedestrianSegmentation:
             image = Image.fromarray(image_array.numpy().astype('uint8'), mode='RGB')
             image.save(f'./images/image{epoch}.png')
 
-
         self.outputs = model.mask_RCNN(self.images, self.targets)
 
         plt.plot(self.losses, label='Losses')
-        plt.plot(self.test_losses, label='Test Losses')
+        # plt.plot(self.test_losses, label='Test Losses')
         plt.show()
 
         if self.ui:
@@ -398,7 +401,7 @@ class PedestrianSegmentation:
         # convert dark masking into one-hot labeled
         # masks contains 0 and a low gray value, so it will be considered as 0
         # convert to numpy to deal with it by openCV
-        masks = (output["masks"].cpu() >= self.mask_weight).squeeze().numpy()
+        # masks = (output["masks"].cpu() >= self.mask_weight).squeeze().numpy()
         masks = output['masks'].cpu().detach().numpy()
         boxes = output["boxes"].cpu().detach().numpy()
         scores = output["scores"].cpu().detach().numpy()
@@ -409,10 +412,10 @@ class PedestrianSegmentation:
 
         for i, mask in enumerate(masks):
             # for i in range(5):
-            # mask = get_coloured_mask(mask)
-            # mask = mask.reshape(img.shape)
-            #
-            # img = cv2.addWeighted(img, 1, mask, 0.5, 0)
+            mask = get_coloured_mask(mask)
+            mask = mask.reshape(img.shape)
+
+            img = cv2.addWeighted(img, 1, mask, 0.5, 0)
             # if i > 0:
             #     break
             cv2.rectangle(img, (round(boxes[i][0]), round(boxes[i][1])), (round(boxes[i][2]), round(boxes[i][3])),
@@ -429,6 +432,7 @@ class PedestrianSegmentation:
         scriptmodule = torch.jit.script(self.mask_RCNN)
         scriptmodule.cpu()
         print(self.mask_RCNN)
+
 
 model = PedestrianSegmentation(config)
 print(model.mask_RCNN)
