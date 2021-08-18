@@ -59,7 +59,7 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
                                                                    # rpn_score_thresh=0.5,
                                                                    # after 256 epochs we can reach
                                                                    # 0.50 threshold
-                                                                   box_score_thresh=0.8,  # during inference only
+                                                                   box_score_thresh=0.4,  # during inference only
                                                                    # box_batch_size_per_image=4096,
                                                                    # box_nms_thresh=0.6,
                                                                    # box_detections_per_img=2,
@@ -96,14 +96,14 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
 
 
 config = {
-    'train': False,
+    'train': True,
     'device': 'cuda',
-    'step_size': 256,
+    'step_size': 512,
     'number_of_steps': 1,
-    'max_count_to_train': 0,  # zero indexed
+    'max_count_to_train': 1e6,  # zero indexed
     'gamma': 0.1,
     'learning_rate': 0.005,
-    'dataset': 'test',
+    'dataset': 'Kaggle',
     'gradient_ui': False,
     'number_of_classes': 2
 }
@@ -219,7 +219,7 @@ class PedestrianSegmentation:
         self.label1.pack(side='top')
         self.frame1.pack(side='top')
 
-    def plot_feature(self, index, threshold=125, positive_value=255, negative_value=0, recalc=True):
+    def plot_feature(self, threshold=125, recalc=True):
         if recalc:
             self.run_backwards()
 
@@ -250,6 +250,28 @@ class PedestrianSegmentation:
         first_three = first_three.int()
 
         return first_three
+
+    def plot_feature_old_impl(self, threshold=125, recalc=True):
+        if recalc:
+            L = self.run_backwards()
+            self.image = self.outputs[1].tensors[0].cpu().detach()
+
+        if recalc or not hasattr(self, "gradient"):
+            self.gradient = self.outputs[1].tensors.grad.cpu().detach()[0]  # there will only ever be on grad
+        gradient_image = self.gradient.permute(1, 2, 0)
+
+        self.outputs[1].tensors.grad = self.outputs[1].tensors.grad * 0
+        tensor_image = self.image.permute(1, 2, 0)
+        convolved_image = gradient_image * tensor_image
+        for i in range(3):
+            max = convolved_image[:, :, i].max()
+            min = convolved_image[:, :, i].min()
+            convolved_image[:, :, i] = (convolved_image[:, :, i] - min) / (max - min) * 255
+
+        for i in range(3):
+            convolved_image[:, :, i][convolved_image[:, :, i] < threshold] = 0
+
+        return convolved_image.int()
 
     def train_one_epoch(self, images_list):
 
@@ -347,7 +369,7 @@ class PedestrianSegmentation:
             print('############################# ', epoch + 1, "/", self.epochs)
             self.train_one_epoch(images)
             self.lr_scheduler.step()
-            image_array = self.plot_feature(0, threshold=119)
+            image_array = self.plot_feature_old_impl(threshold=119)
             image = Image.fromarray(image_array.numpy().astype('uint8'), mode='RGB')
             image.save(f'./images/image{epoch}.png')
 
