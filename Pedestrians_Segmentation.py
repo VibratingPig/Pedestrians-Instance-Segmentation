@@ -96,9 +96,9 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
 
 
 config = {
-    'train': True,
+    'train': False,
     'device': 'cuda',
-    'step_size': 512,
+    'step_size': 1024,
     'number_of_steps': 1,
     'max_count_to_train': 1e6,  # zero indexed
     'gamma': 0.1,
@@ -446,7 +446,7 @@ class PedestrianSegmentation:
 
         # cv2.imshow("original", original)
         # cv2.imshow("masked", img)
-        cv2.imwrite(f'./{name}', img)
+        cv2.imwrite(f'./inference/{name}', img)
 
         # cv2.waitKey(0)
 
