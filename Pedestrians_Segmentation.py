@@ -1,3 +1,5 @@
+import ast
+import math
 import os
 import tkinter as tk
 import tkinter.ttk as ttk
@@ -17,8 +19,11 @@ from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 
 from helpers import get_dataset_loaders, get_coloured_mask, intersection_over_union
 
-import subprocess
-subprocess.run(['rm', '/home/piero/morespace/Documents/Pedestrians-Instance-Segmentation/images/*'])
+import pandas as pd
+
+
+# import subprocess
+# subprocess.run(['rm', '/home/piero/morespace/Documents/Pedestrians-Instance-Segmentation/images/*'])
 
 class ForwardHookCapture:
 
@@ -54,7 +59,8 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
                                                                    # rpn_post_nms_top_n_train=2,
                                                                    # rpn_nms_thresh=0.9,
                                                                    # box_fg_iou_thresh=0.95,
-                                                                   rpn_bg_iou_thresh=0.5, # setting these two differently allows for inbetween labelling of -1
+                                                                   rpn_bg_iou_thresh=0.5,
+                                                                   # setting these two differently allows for inbetween labelling of -1
                                                                    rpn_fg_iou_thresh=0.5,
                                                                    # rpn_score_thresh=0.5,
                                                                    # after 256 epochs we can reach
@@ -244,9 +250,10 @@ class PedestrianSegmentation:
             # Note you can set this to 0 to see what contradictory evidence is presented
             convolved_image[:, :, i][convolved_image[:, :, i] < threshold] = 0
 
-        first_three = convolved_image[:,:,0:3]
+        first_three = convolved_image[:, :, 0:3]
         for i in range(3):
-            first_three[:,:,i] = ((first_three[:,:,i] - first_three[:,:,i].min()) / first_three[:,:,i].max()) * 255
+            first_three[:, :, i] = ((first_three[:, :, i] - first_three[:, :, i].min()) / first_three[:, :,
+                                                                                          i].max()) * 255
         first_three = first_three.int()
 
         return first_three
@@ -430,19 +437,44 @@ class PedestrianSegmentation:
         print(f'scores on eval {scores}')
         # print(f'boxes)
         img = cv2.imread(path)
-        original = img
 
-        for i, mask in enumerate(masks):
-            # for i in range(5):
-            mask = get_coloured_mask(mask)
-            mask = mask.reshape(img.shape)
+        df = pd.read_csv('./Kaggle/PedMasks/train_image_level.csv')
 
-            img = cv2.addWeighted(img, 1, mask, 0.5, 0)
+        image_id = name.split('.')[0] + "_image"
+        # print(f'considering image {image_id}')
+        row = df[df.id == image_id]
+
+        for i, score in enumerate(scores):
+            # TODO Masks don't work
+            # # for i in range(5):
+            # mask = get_coloured_mask(mask)
+            # mask = mask.reshape(img.shape)
+            #
+            # img = cv2.addWeighted(img, 1, mask, 0.5, 0)
             # if i > 0:
             #     break
-            cv2.rectangle(img, (round(boxes[i][0]), round(boxes[i][1])), (round(boxes[i][2]), round(boxes[i][3])),
+            x = round(boxes[i][0])
+            y = round(boxes[i][1])
+            cv2.rectangle(img, (x, y), (round(boxes[i][2]), round(boxes[i][3])),
                           color=(0, 0, 255), thickness=3)
+            formatted_score = round(score * 100, 2)
+            cv2.putText(img, f'Score {formatted_score}%', (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
             # cv2.rectangle(img, (boxes[i][0], boxes[i][1]), (boxes[i][2],boxes[i][3]))
+            # break
+
+        for box in row.boxes:
+            if type(box) == str or not math.isnan(box):
+                list_of_dictionaries = ast.literal_eval(box)
+                for _, boundary_boxes in enumerate(list_of_dictionaries):
+                    x = int(boundary_boxes['x'])
+                    y = int(boundary_boxes['y'])
+                    x_width = int(boundary_boxes['width'])
+                    y_height = int(boundary_boxes['height'])
+                    cv2.rectangle(img, (x, y), (x + x_width, y + y_height),
+                                  color=(255, 0, 0), thickness=3)
+                    cv2.putText(img, 'Ground Truth', (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
+            else:
+                cv2.putText(img, 'NO COVID', (100,100), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
 
         # cv2.imshow("original", original)
         # cv2.imshow("masked", img)

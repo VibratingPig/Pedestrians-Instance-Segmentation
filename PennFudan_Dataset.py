@@ -105,6 +105,7 @@ class PennnFudanDataset(Dataset):
             oo = np.zeros([1, image.width, image.height])
             # row.boxes is a pandas series
 
+
             for box in row.boxes:
                 # print(f'Attempting to literally parse box {box} for {image_id}')
                 # we have no bounding boxes for some of these images and they should report nothing
