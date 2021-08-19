@@ -49,7 +49,7 @@ class PennnFudanDataset(Dataset):
     def __getitem__(self, index):
 
         image_name = self.imagesPaths[index].split('/')[2].split(".")[0]
-        print(f'Processing {image_name}')
+        # print(f'Processing {image_name}')
         # load image & mask
         image = Image.open(self.imagesPaths[index])
         if self.use_masks:
@@ -121,7 +121,7 @@ class PennnFudanDataset(Dataset):
                         x_width = int(boundary_boxes['width'])
                         y_height = int(boundary_boxes['height'])
 
-                        print(f'For {image_name} setting {x},{y} to {x+x_width}, {y+y_height} for {x_width} and {y_height}')
+                        # print(f'For {image_name} setting {x},{y} to {x+x_width}, {y+y_height} for {x_width} and {y_height}')
                         boxes.append([x, y, x + x_width, y + y_height])
                         area.append(x_width * y_height)
                         oo[i, x:(x + x_width), y:(y + y_height)] = i + 1
