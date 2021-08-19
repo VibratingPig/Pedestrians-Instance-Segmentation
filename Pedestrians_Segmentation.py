@@ -22,7 +22,8 @@ from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 from helpers import get_dataset_loaders
 from tqdm import tqdm
 
-subprocess.run(['rm /home/piero/morespace/Documents/Pedestrians-Instance-Segmentation/images/*'], shell=True)
+subprocess.run(['rm /home/piero/morespace/Documents/Pedestrians-Instance-Segmentation/inference/*'], shell=True)
+subprocess.run(['rm /home/piero/morespace/Documents/Pedestrians-Instance-Segmentation/*.png'], shell=True)
 
 class ForwardHookCapture:
 
@@ -101,17 +102,20 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
 
 
 config = {
-    'train': True,
+    'train': False,
     'device': 'cuda',
-    'step_size': 16,
+    'step_size': 256,
     'number_of_steps': 1,
-    'max_count_to_train': 0,  # zero indexed
+    'max_count_to_train': 1e6,  # zero indexed
     'gamma': 0.1,
     'learning_rate': 0.005,
     'dataset': 'Kaggle',
     'gradient_ui': False,
-    'number_of_classes': 2
+    'number_of_classes': 3
 }
+
+if config['train']:
+    subprocess.run(['rm /home/piero/morespace/Documents/Pedestrians-Instance-Segmentation/images/*'], shell=True)
 
 
 class PedestrianSegmentation:
@@ -433,6 +437,8 @@ class PedestrianSegmentation:
         masks = output['masks'].cpu().detach().numpy()
         boxes = output["boxes"].cpu().detach().numpy()
         scores = output["scores"].cpu().detach().numpy()
+        labels = output["labels"].cpu().detach().numpy()
+
         #  print(f'scores on eval {scores}')
         # #  print(f'boxes)
         img = cv2.imread(path)
@@ -454,10 +460,11 @@ class PedestrianSegmentation:
             #     break
             x = round(boxes[i][0])
             y = round(boxes[i][1])
+            # print(boxes)
             cv2.rectangle(img, (x, y), (round(boxes[i][2]), round(boxes[i][3])),
                           color=(0, 0, 255), thickness=3)
             formatted_score = round(score * 100, 2)
-            cv2.putText(img, f'Score {formatted_score}%', (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+            cv2.putText(img, f'Label {labels[i]} Score {formatted_score}%', (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
             # cv2.rectangle(img, (boxes[i][0], boxes[i][1]), (boxes[i][2],boxes[i][3]))
             # break
 
@@ -471,7 +478,7 @@ class PedestrianSegmentation:
                     y_height = int(boundary_boxes['height'])
                     cv2.rectangle(img, (x, y), (x + x_width, y + y_height),
                                   color=(255, 0, 0), thickness=3)
-                    cv2.putText(img, 'Ground Truth', (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
+                    cv2.putText(img, 'Ground Truth', (x, y - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
             else:
                 cv2.putText(img, 'NO COVID', (100,100), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
 
