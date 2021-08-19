@@ -22,8 +22,8 @@ from helpers import get_dataset_loaders, get_coloured_mask, intersection_over_un
 import pandas as pd
 
 
-# import subprocess
-# subprocess.run(['rm', '/home/piero/morespace/Documents/Pedestrians-Instance-Segmentation/images/*'])
+import subprocess
+subprocess.run(['rm /home/piero/morespace/Documents/Pedestrians-Instance-Segmentation/images/*'], shell=True)
 
 class ForwardHookCapture:
 
