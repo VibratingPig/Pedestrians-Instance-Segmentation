@@ -26,8 +26,8 @@ subprocess.run(['rm /home/piero/morespace/Documents/Pedestrians-Instance-Segment
 subprocess.run(['rm /home/piero/morespace/Documents/Pedestrians-Instance-Segmentation/*.png'], shell=True)
 
 config = {
-    'train': False,
-    'device': 'cpu',
+    'train': True,
+    'device': 'cuda',
     'step_size': 1,
     'number_of_steps': 2,
     'max_count_to_train': 1e6,  # zero indexed
@@ -35,7 +35,8 @@ config = {
     'learning_rate': 0.05,
     'dataset': 'Kaggle',
     'gradient_ui': False,
-    'number_of_classes': 3
+    'number_of_classes': 3,
+    'box_thresh': 0.3
 }
 
 class ForwardHookCapture:
@@ -56,7 +57,7 @@ class ForwardHookCapture:
         self.inputs = input
 
 
-def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
+def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int, box_thresh : float):
 
     mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True,
                                                                    # rpn_pre_nms_top_n_train=2,
@@ -69,7 +70,7 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
                                                                    # rpn_score_thresh=0.5,
                                                                    # after 256 epochs we can reach
                                                                    # 0.50 threshold
-                                                                   box_score_thresh=0.0,  # during inference only
+                                                                   box_score_thresh=box_thresh,  # during inference only
                                                                    # box_batch_size_per_image=4096,
                                                                    # box_nms_thresh=0.6,
                                                                    # box_detections_per_img=2,
@@ -136,7 +137,7 @@ class PedestrianSegmentation:
                                                                                 self.root, self.split_dataset_factor)
 
         # model
-        self.mask_RCNN = mask_rcnn_transfer_learning(is_finetune=True, num_classes=system_config['number_of_classes'])
+        self.mask_RCNN = mask_rcnn_transfer_learning(is_finetune=True, num_classes=system_config['number_of_classes'], box_thresh=system_config['box_thresh'])
         device = torch.device(self.device)
         self.mask_RCNN.to(device)
 
@@ -335,11 +336,11 @@ class PedestrianSegmentation:
 
         self.outputs = model.mask_RCNN(self.images, self.targets)
 
-        plt.plot(self.losses, label='Losses')
+        plt.plot([math.log(loss) for loss in self.losses], label='Losses')
         plt.legend()
         plt.show()
 
-        plt.plot(self.test_losses, label='Test Losses')
+        plt.plot([math.log(loss) for loss in self.test_losses], label='Test Losses')
         plt.legend()
         plt.show()
 
