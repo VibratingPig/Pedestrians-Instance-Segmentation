@@ -18,12 +18,25 @@ from matplotlib import pyplot as plt
 from torch import Tensor
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
+from tqdm import tqdm
 
 from helpers import get_dataset_loaders
-from tqdm import tqdm
 
 subprocess.run(['rm /home/piero/morespace/Documents/Pedestrians-Instance-Segmentation/inference/*'], shell=True)
 subprocess.run(['rm /home/piero/morespace/Documents/Pedestrians-Instance-Segmentation/*.png'], shell=True)
+
+config = {
+    'train': False,
+    'device': 'cpu',
+    'step_size': 1,
+    'number_of_steps': 2,
+    'max_count_to_train': 1e6,  # zero indexed
+    'gamma': 0.1,
+    'learning_rate': 0.05,
+    'dataset': 'Kaggle',
+    'gradient_ui': False,
+    'number_of_classes': 3
+}
 
 class ForwardHookCapture:
 
@@ -44,14 +57,6 @@ class ForwardHookCapture:
 
 
 def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
-    # PG do not use the coco data set but train from the ground up
-    # set pretrained to False
-
-    # magic numbers!!!
-    image_mean = [0.1575, 0.1678, 0.1781]
-    image_std = [0.1385, 0.1514, 0.1644]
-    # image_mean = [0, 0, 0]
-    # image_std = [1, 1, 1]
 
     mask_RCNN = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True,
                                                                    # rpn_pre_nms_top_n_train=2,
@@ -64,7 +69,7 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
                                                                    # rpn_score_thresh=0.5,
                                                                    # after 256 epochs we can reach
                                                                    # 0.50 threshold
-                                                                   box_score_thresh=0.2,  # during inference only
+                                                                   box_score_thresh=0.0,  # during inference only
                                                                    # box_batch_size_per_image=4096,
                                                                    # box_nms_thresh=0.6,
                                                                    # box_detections_per_img=2,
@@ -96,18 +101,6 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
     return mask_RCNN
 
 
-config = {
-    'train': True,
-    'device': 'cuda',
-    'step_size': 1,
-    'number_of_steps': 2,
-    'max_count_to_train': 1e6,  # zero indexed
-    'gamma': 0.1,
-    'learning_rate': 0.05,
-    'dataset': 'Kaggle',
-    'gradient_ui': False,
-    'number_of_classes': 3
-}
 
 if config['train']:
     subprocess.run(['rm /home/piero/morespace/Documents/Pedestrians-Instance-Segmentation/images/*'], shell=True)
@@ -239,22 +232,6 @@ class PedestrianSegmentation:
         output_tmp = self.hook_cls.output[0, :, :, :].cpu().detach().permute(1,2,0)
         # convolved_image = output_tmp[:,:,feature_index]
                           # * gradient_image  # * self.hook_cls.inputs # * tensor_image
-        # for i in range(3):
-        #     max = convolved_image[:, :, i].max()
-        #     min = convolved_image[:, :, i].min()
-        #     convolved_image[:, :, i] = (convolved_image[:, :, i] - min) / (max - min) * 255
-        #
-        # for i in range(3):
-        #     # Note you can set this to 0 to see what contradictory evidence is presented
-        #     convolved_image[:, :, i][convolved_image[:, :, i] < threshold] = 0
-        #
-        # first_three = convolved_image[:, :, 0:3]
-        # for i in range(3):
-        #     first_three[:, :, i] = ((first_three[:, :, i] - first_three[:, :, i].min()) / first_three[:, :,
-        #                                                                                   i].max()) * 255
-        # first_three = first_three.int()
-        #
-        # return first_three
         return output_tmp
 
     def plot_feature_old_impl(self, threshold=125, recalc=True):
@@ -327,12 +304,6 @@ class PedestrianSegmentation:
 
     def run_backwards(self):
         self.outputs = self.mask_RCNN(self.images, self.targets)
-        # first_image = self.outputs[1].tensors.cpu().detach()[0, :, :, :].permute(1, 2, 0).numpy()
-        # # for debug
-        # plt.imshow(first_image)
-        # plt.show()
-        # image = Image.fromarray(first_image, mode='RGB')
-        # image.save(f'./images/first_image{self.backwards_counter}.png')
         self.backwards_counter += 1
         loss = self.outputs[0]
         L_cls = loss["loss_classifier"]
