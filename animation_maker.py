@@ -28,4 +28,4 @@ for k in range(0, 512):
 
 animation = animation.ArtistAnimation(fig, myimages, interval=20, blit=True)
 
-animation.save("animation.mp4", fps = 4)
+animation.save("animation.mp4", fps = 16)

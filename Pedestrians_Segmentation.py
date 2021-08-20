@@ -65,7 +65,7 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
                                                                    # rpn_score_thresh=0.5,
                                                                    # after 256 epochs we can reach
                                                                    # 0.50 threshold
-                                                                   box_score_thresh=0.4,  # during inference only
+                                                                   box_score_thresh=0.2,  # during inference only
                                                                    # box_batch_size_per_image=4096,
                                                                    # box_nms_thresh=0.6,
                                                                    # box_detections_per_img=2,
@@ -102,13 +102,13 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
 
 
 config = {
-    'train': False,
+    'train': True,
     'device': 'cuda',
-    'step_size': 256,
-    'number_of_steps': 1,
+    'step_size': 1,
+    'number_of_steps': 2,
     'max_count_to_train': 1e6,  # zero indexed
     'gamma': 0.1,
-    'learning_rate': 0.005,
+    'learning_rate': 0.05,
     'dataset': 'Kaggle',
     'gradient_ui': False,
     'number_of_classes': 3
@@ -211,7 +211,7 @@ class PedestrianSegmentation:
     def feature_changed(self, scale_value):
         self.feature_value = round(float(scale_value))
         image = self.plot_feature(self.feature_value, threshold=self.threshold)
-        photo_image = ImageTk.PhotoImage(image=Image.fromarray(image.numpy().astype('uint8'), mode='RGB'))
+        photo_image = ImageTk.PhotoImage(image=Image.fromarray(image[:,:,self.feature_value].numpy()))
         self.label1.configure(image=photo_image)
         self.label1.image = photo_image
         self.label1.pack(side='top')
@@ -221,14 +221,14 @@ class PedestrianSegmentation:
         self.threshold = round(float(scale_value))
         # #  print(self.threshold)
         image = self.plot_feature(self.feature_value, threshold=self.threshold, recalc=False)
-        photo_image = ImageTk.PhotoImage(image=Image.fromarray(image.numpy().astype('uint8'),
+        photo_image = ImageTk.PhotoImage(image=Image.fromarray(image[:,:,self.feature_value].numpy().astype('uint8'),
                                                                mode='RGB'))
         self.label1.configure(image=photo_image)
         self.label1.image = photo_image
         self.label1.pack(side='top')
         self.frame1.pack(side='top')
 
-    def plot_feature(self, threshold=125, recalc=True):
+    def plot_feature(self, feature_index, threshold=125, recalc=True):
         if recalc:
             self.run_backwards()
 
@@ -241,25 +241,27 @@ class PedestrianSegmentation:
                 except:
                     gradient = self.hook_cls.inputs[0].grad
 
-        gradient_image = gradient.permute(1, 2, 0)
-        convolved_image = self.hook_cls.output[0, :, :, :].cpu().permute(1, 2,
-                                                                         0) * gradient_image  # * self.hook_cls.inputs # * tensor_image
-        for i in range(3):
-            max = convolved_image[:, :, i].max()
-            min = convolved_image[:, :, i].min()
-            convolved_image[:, :, i] = (convolved_image[:, :, i] - min) / (max - min) * 255
-
-        for i in range(3):
-            # Note you can set this to 0 to see what contradictory evidence is presented
-            convolved_image[:, :, i][convolved_image[:, :, i] < threshold] = 0
-
-        first_three = convolved_image[:, :, 0:3]
-        for i in range(3):
-            first_three[:, :, i] = ((first_three[:, :, i] - first_three[:, :, i].min()) / first_three[:, :,
-                                                                                          i].max()) * 255
-        first_three = first_three.int()
-
-        return first_three
+        # gradient_image = gradient.permute(1, 2, 0)[:,:,feature_index]
+        output_tmp = self.hook_cls.output[0, :, :, :].cpu().detach().permute(1,2,0)
+        # convolved_image = output_tmp[:,:,feature_index]
+                          # * gradient_image  # * self.hook_cls.inputs # * tensor_image
+        # for i in range(3):
+        #     max = convolved_image[:, :, i].max()
+        #     min = convolved_image[:, :, i].min()
+        #     convolved_image[:, :, i] = (convolved_image[:, :, i] - min) / (max - min) * 255
+        #
+        # for i in range(3):
+        #     # Note you can set this to 0 to see what contradictory evidence is presented
+        #     convolved_image[:, :, i][convolved_image[:, :, i] < threshold] = 0
+        #
+        # first_three = convolved_image[:, :, 0:3]
+        # for i in range(3):
+        #     first_three[:, :, i] = ((first_three[:, :, i] - first_three[:, :, i].min()) / first_three[:, :,
+        #                                                                                   i].max()) * 255
+        # first_three = first_three.int()
+        #
+        # return first_three
+        return output_tmp
 
     def plot_feature_old_impl(self, threshold=125, recalc=True):
         if recalc:
@@ -446,7 +448,7 @@ class PedestrianSegmentation:
         df = pd.read_csv('./Kaggle/PedMasks/train_image_level.csv')
 
         image_id = name.split('.')[0] + "_image"
-        # #  print(f'considering image {image_id}')
+        print(f'considering image {image_id}')
         row = df[df.id == image_id]
 
         for i, score in enumerate(scores):
@@ -460,7 +462,7 @@ class PedestrianSegmentation:
             #     break
             x = round(boxes[i][0])
             y = round(boxes[i][1])
-            # print(boxes)
+            print(boxes)
             cv2.rectangle(img, (x, y), (round(boxes[i][2]), round(boxes[i][3])),
                           color=(0, 0, 255), thickness=3)
             formatted_score = round(score * 100, 2)
@@ -495,7 +497,7 @@ class PedestrianSegmentation:
 
 
 model = PedestrianSegmentation(config)
-#  print(model.mask_RCNN)
+print(model.mask_RCNN)
 if config['train']:
     images = []
     model.train(images)

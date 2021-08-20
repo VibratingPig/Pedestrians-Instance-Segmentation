@@ -10,7 +10,7 @@ import subprocess
 #     for subdir in subdirs:
 #         os.wal
 
-number = 20
+number = 40
 count = 0
 walker = os.walk('/home/piero/morespace/Documents/Phd/kaggle/data/train')
 
