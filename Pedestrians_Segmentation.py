@@ -35,7 +35,6 @@ class ForwardHookCapture:
         # at this point we have a tensor which is 400x432x64 - how do we represent that
         # we can't send it to plot.imshow - so how do we reduce the dimensionality
 
-        # #  print('this is the second run forward - we need to understand how to backprop the relevance')
         self.output = output
         try:
             Tensor.retain_grad(self.output[0].tensors[0])
@@ -79,8 +78,6 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
     #     for param in mask_RCNN.parameters():
     #         param.requires_grad = False
 
-    # #  print(mask_RCNN)
-
     in_features_classes_fc = mask_RCNN.roi_heads.box_predictor.cls_score.in_features
     in_features_mask = mask_RCNN.roi_heads.mask_predictor.conv5_mask.in_channels
 
@@ -95,8 +92,6 @@ def mask_rcnn_transfer_learning(is_finetune: bool, num_classes: int):
 
     mask_RCNN.roi_heads.box_predictor = fastRCNN_TransferLayer
     mask_RCNN.roi_heads.mask_predictor = maskRCNN_TransferLayer
-
-    # #  print(mask_RCNN)
 
     return mask_RCNN
 
@@ -140,7 +135,7 @@ class PedestrianSegmentation:
         self.learning_rate = system_config['learning_rate']
         self.epochs = system_config['number_of_steps'] * step_size  # make it a multiple of three for the step size
 
-        self.split_dataset_factor = 1
+        self.split_dataset_factor = 0.7
 
         # dataset
         # test_batch_size = 1 for looping over single sample
@@ -219,7 +214,6 @@ class PedestrianSegmentation:
 
     def scale_changed(self, scale_value):
         self.threshold = round(float(scale_value))
-        # #  print(self.threshold)
         image = self.plot_feature(self.feature_value, threshold=self.threshold, recalc=False)
         photo_image = ImageTk.PhotoImage(image=Image.fromarray(image[:,:,self.feature_value].numpy().astype('uint8'),
                                                                mode='RGB'))
@@ -314,34 +308,22 @@ class PedestrianSegmentation:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
-                #  print("Loss = ", L.item(), " batch = ", i, "/", batches_per_epoch)
                 self.losses.append(L.item())
                 count += 1
                 if count > self.max_count_to_train:
-                    # #  print('batch greater than 2 - breaking out of loop')
                     break
 
-        # #  print('Testing######')
-        # for i, (images, targets) in enumerate(self.test_loader):
-        #     if images:  # could be none due to being 0
-        #         images = list(image.to(device) for image in images)
-        #         targets = [{k: v.to(device) for k, v in t.items()} for t in targets if t is not None]
-        #         self.images = images
-        #         self.targets = targets
-        #
-        #         # model in training mode accepts both input and output and return the loss of all types
-        #         # PG See torchvision.models.detection.transform.GeneralizedRCNNTransform for the transformation applied
-        #         # it does resize, mean shifts and std deviations shift the images prior to use.
-        #         L = self.run_backwards()
-        #
-        #         # we don't step backwards here as we don't want to include the test/validation data
-        #         #  print("Loss = ", L.item(), " batch = ", i, "/", batches_per_epoch)
-        #         self.test_losses.append(L.item())
+        for i, (images, targets) in enumerate(self.test_loader):
+            if images:  # could be none due to being 0
+                images = list(image.to(device) for image in images)
+                targets = [{k: v.to(device) for k, v in t.items()} for t in targets if t is not None]
+                self.images = images
+                self.targets = targets
 
-        # move everything to CPU
-        # device = torch.device('cpu')
-        # images = list(image.to(device) for image in images)
-        # targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+                L = self.run_backwards()
+
+                # we don't step backwards here as we don't want to include the test/validation data
+                self.test_losses.append(L.item())
 
     def run_backwards(self):
         self.outputs = self.mask_RCNN(self.images, self.targets)
@@ -353,16 +335,12 @@ class PedestrianSegmentation:
         # image.save(f'./images/first_image{self.backwards_counter}.png')
         self.backwards_counter += 1
         loss = self.outputs[0]
-        # Loss = L_cls + L_box + L_mask + L_objectness + L_rpn
         L_cls = loss["loss_classifier"]
         L_box = loss["loss_box_reg"]
         L_mask = loss["loss_mask"]
         L_objectness = loss["loss_objectness"]
         L_rpn = loss["loss_rpn_box_reg"]
-        #  print(
-        #     f'loss classifier {L_cls} loss box {L_box} loss mask {L_mask} loss object {L_objectness} loss rpn {L_rpn}')
         L = L_cls + L_box + L_mask + L_objectness + L_rpn
-        # self.losses.append(L_objectness.cpu().detach().numpy().__float__())
         L.backward()
         return L
 
@@ -378,7 +356,6 @@ class PedestrianSegmentation:
         selected_tensor.register_forward_hook(self.hook_cls.hook)
 
         for epoch in tqdm(range(0, self.epochs)):
-            # #  print('############################# ', epoch + 1, "/", self.epochs)
             self.train_one_epoch(images)
             self.lr_scheduler.step()
             image_array = self.plot_feature_old_impl(threshold=119)
@@ -388,22 +365,16 @@ class PedestrianSegmentation:
         self.outputs = model.mask_RCNN(self.images, self.targets)
 
         plt.plot(self.losses, label='Losses')
-        # plt.plot(self.test_losses, label='Test Losses')
+        plt.legend()
+        plt.show()
+
+        plt.plot(self.test_losses, label='Test Losses')
+        plt.legend()
         plt.show()
 
         if self.ui:
             self.build_ui()
             self.mainwindow.mainloop()
-
-        # ### NB Switched to Eval
-        # self.mask_RCNN.eval()
-        # torch.cuda.empty_cache()
-        # self.outputs = model.mask_RCNN(self.images)
-        # root = f"{self.root}/Test"
-        # paths = sorted(os.listdir(f"{self.root}/Test"))
-        # for _path in paths:
-        #     path = os.path.join(root, _path)
-        #     self.detect(path, _path)
 
     def save(self):
         torch.save(self.mask_RCNN.state_dict(), self.weights_path)
@@ -417,8 +388,6 @@ class PedestrianSegmentation:
         run the forward inference using the path and the name
         :type path: object
         """
-        # transform = torchvision.transforms.ToTensor()
-
         image = Image.open(path)
         image = self.transform(image)
 
@@ -428,47 +397,25 @@ class PedestrianSegmentation:
             self.mask_RCNN.eval()
             combined_output = self.mask_RCNN([image.to(device)])
             output = combined_output[0][0]  # [0] because we pass 1 image
-            # image_tensor_from_output = combined_output[1]
 
-        # #  print(output)
-
-        # convert dark masking into one-hot labeled
-        # masks contains 0 and a low gray value, so it will be considered as 0
-        # convert to numpy to deal with it by openCV
-        # masks = (output["masks"].cpu() >= self.mask_weight).squeeze().numpy()
-        masks = output['masks'].cpu().detach().numpy()
         boxes = output["boxes"].cpu().detach().numpy()
         scores = output["scores"].cpu().detach().numpy()
         labels = output["labels"].cpu().detach().numpy()
 
-        #  print(f'scores on eval {scores}')
-        # #  print(f'boxes)
         img = cv2.imread(path)
 
         df = pd.read_csv('./Kaggle/PedMasks/train_image_level.csv')
 
         image_id = name.split('.')[0] + "_image"
-        print(f'considering image {image_id}')
         row = df[df.id == image_id]
 
         for i, score in enumerate(scores):
-            # TODO Masks don't work
-            # # for i in range(5):
-            # mask = get_coloured_mask(mask)
-            # mask = mask.reshape(img.shape)
-            #
-            # img = cv2.addWeighted(img, 1, mask, 0.5, 0)
-            # if i > 0:
-            #     break
             x = round(boxes[i][0])
             y = round(boxes[i][1])
-            print(boxes)
             cv2.rectangle(img, (x, y), (round(boxes[i][2]), round(boxes[i][3])),
                           color=(0, 0, 255), thickness=3)
             formatted_score = round(score * 100, 2)
             cv2.putText(img, f'Label {labels[i]} Score {formatted_score}%', (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
-            # cv2.rectangle(img, (boxes[i][0], boxes[i][1]), (boxes[i][2],boxes[i][3]))
-            # break
 
         for box in row.boxes:
             if type(box) == str or not math.isnan(box):
@@ -484,20 +431,11 @@ class PedestrianSegmentation:
             else:
                 cv2.putText(img, 'NO COVID', (100,100), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
 
-        # cv2.imshow("original", original)
-        # cv2.imshow("masked", img)
         cv2.imwrite(f'./inference/{name}', img)
-
-        # cv2.waitKey(0)
-
-    def foo(self):
-        scriptmodule = torch.jit.script(self.mask_RCNN)
-        scriptmodule.cpu()
-        #  print(self.mask_RCNN)
 
 
 model = PedestrianSegmentation(config)
-print(model.mask_RCNN)
+
 if config['train']:
     images = []
     model.train(images)
@@ -512,4 +450,3 @@ else:
         path = os.path.join(root, _path)
         # model.eval()
         model.detect(path, _path)
-# # #
